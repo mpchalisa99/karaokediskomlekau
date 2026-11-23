@@ -1,0 +1,2717 @@
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
+import confetti from 'canvas-confetti';
+import { Song, QueueItem, SuffixFilter, WebSocketMessage, RemoteClientInfo, RemoteNotification, SongScoreData, ScreenReaction, SoundFxType, JuryVote, JuryScoreSummary, getScoreQuote, SmartMcAnnouncement, SmartMcTier } from '../types/karaoke';
+import { searchKaraokeSongs, CURATED_LIBRARY, CATEGORY_PRESETS, extractYoutubeVideoId, fetchOEmbedInfo } from '../services/youtube';
+import { audioFx } from '../services/audioFx';
+import { generateSmartMcAnnouncement, speakSmartMcIndonesian, stopSmartMcSpeech } from '../services/smartMc';
+import { useWebRTCAudioReceiver, ActiveWirelessMic } from '../hooks/useWebRTCAudioReceiver';
+import { useKaraokeScoring, LiveScoringState } from '../hooks/useKaraokeScoring';
+import { getSignalingWebSocketUrl } from '../services/signaling';
+import { getTvPeerId, createPeer, startPeerHeartbeat, type PeerMessage, type DataConnection } from '../services/peerManager';
+import { isSmartTvDevice } from '../utils/fullscreen';
+import type Peer from 'peerjs';
+
+interface KaraokeContextType {
+  // Search & Filter
+  searchQuery: string;
+  setSearchQuery: (query: string) => void;
+  suffixFilter: SuffixFilter;
+  setSuffixFilter: (filter: SuffixFilter) => void;
+  searchResults: Song[];
+  isSearching: boolean;
+  searchError: string | null;
+  isCuratedFallback: boolean;
+  activeCategory: string | null;
+  executeSearch: (query?: string, categoryId?: string) => Promise<void>;
+  addDirectVideoUrl: (urlOrId: string, singerName?: string, playImmediately?: boolean) => Promise<boolean>;
+
+  // Queue Management
+  queue: QueueItem[];
+  currentSong: Song | null;
+  history: Song[];
+  addToQueue: (song: Song, singerName?: string, playNext?: boolean, customQueueId?: string) => void;
+  removeFromQueue: (queueId: string) => void;
+  moveQueueItem: (fromIndex: number, toIndex: number) => void;
+  clearQueue: () => void;
+  updateSingerName: (queueId: string, newSinger: string) => void;
+  playSongNow: (song: Song, singerName?: string) => void;
+  skipNextSong: () => void;
+  replayCurrentSong: () => void;
+
+  // Player State
+  isPlaying: boolean;
+  setIsPlaying: (playing: boolean) => void;
+  togglePlayPause: (broadcast?: boolean) => void;
+  audioVolume: number;
+  setAudioVolume: (volume: number) => void;
+  changeAudioVolume: (volume: number | ((prev: number) => number)) => void;
+  isMuted: boolean;
+  setIsMuted: (muted: boolean) => void;
+  toggleMusicMute: () => void;
+  handlePlayerEnded: () => void;
+  playerRef: any;
+
+  // UI States
+  isQueueOpenMobile: boolean;
+  setIsQueueOpenMobile: (open: boolean) => void;
+  isScoreModalOpen: boolean;
+  setIsScoreModalOpen: (open: boolean) => void;
+  currentScoreData: SongScoreData | null;
+  evaluateCurrentSong: () => void;
+  notifyPlaybackTime: (currentTime: number, totalDuration?: number) => void;
+  isTvMode: boolean;
+  setIsTvMode: (tvMode: boolean) => void;
+  defaultSingerName: string;
+  setDefaultSingerName: (name: string) => void;
+
+  // Dewan Juri Prajurit (Multi-Client Collaborative Scoring)
+  juryVotes: JuryVote[];
+  submitJuryVote: (score: number, juryName?: string, clientId?: string) => void;
+  getJuryAverageSummary: () => JuryScoreSummary;
+
+  // Smart MC Diskomlekau (100% Local Pantun & Indonesian Speech Synthesis)
+  activeMcAnnouncement: SmartMcAnnouncement | null;
+  isMcSpeaking: boolean;
+  isPlayerEnded: boolean;
+  triggerSmartMc: (options?: {
+    singerName?: string;
+    songTitle?: string;
+    score?: number | null;
+    forceTier?: SmartMcTier;
+    triggeredBy?: string;
+    announcement?: SmartMcAnnouncement;
+    broadcast?: boolean;
+    isManual?: boolean;
+    nextSongTitle?: string;
+    onSpeechEnd?: () => void;
+  }) => void;
+  replaySmartMcSpeech: () => void;
+  dismissSmartMc: () => void;
+
+  // Remote & Sync
+  roomId: string;
+  remoteConnectedDevices: number;
+  remoteClientsList: RemoteClientInfo[];
+  remoteNotifications: RemoteNotification[];
+  removeRemoteNotification: (id: string) => void;
+  activeReactions: ScreenReaction[];
+  triggerSoundFx: (type: SoundFxType | string, broadcast?: boolean, senderName?: string) => void;
+
+  // WebRTC Wireless Microphone Audio
+  activeWirelessMics: ActiveWirelessMic[];
+  masterMicVolume: number;
+  setMasterMicVolume: (vol: number) => void;
+  masterMicEcho: number;
+  setMasterMicEcho: (echo: number) => void;
+  isMasterMicMuted: boolean;
+  setIsMasterMicMuted: (muted: boolean) => void;
+  increaseMicVolume: () => void;
+  decreaseMicVolume: () => void;
+  increaseMicEcho: () => void;
+  decreaseMicEcho: () => void;
+  isAudioSuspended: boolean;
+  resumeAudio: () => void;
+  setClientMicVolume: (senderId: string, volume: number) => void;
+  setClientMicEcho: (senderId: string, echo: number) => void;
+  toggleClientMicMute: (senderId: string) => void;
+
+  // Web Audio API Karaoke Scoring System
+  scoringState: LiveScoringState;
+  isScoringActive: boolean;
+  startScoring: () => void;
+  stopScoringAndGetResult: () => SongScoreData | null;
+  musicMediaRef: React.MutableRefObject<HTMLMediaElement | null>;
+
+  // Vocal Sync Delay / Music Delay Adjustment (TV DelayNode buffer)
+  musicDelayMs: number;
+  setMusicDelayMs: (ms: number, broadcast?: boolean) => void;
+  connectMusicMediaElement: (element: HTMLMediaElement) => void;
+}
+
+const KaraokeContext = createContext<KaraokeContextType | null>(null);
+
+const STORAGE_KEYS = {
+  QUEUE: 'karaoke_queue_list_v1',
+  HISTORY: 'karaoke_history_list_v1',
+  CURRENT: 'karaoke_current_song_v1',
+  SINGER: 'karaoke_default_singer_v1',
+  ROOM_ID: 'karaoke_room_id_v1',
+};
+
+export const KaraokeProvider: React.FC<{ children: React.ReactNode; initialIsTvMode?: boolean }> = ({
+  children,
+  initialIsTvMode = false,
+}) => {
+  // Stored preferences
+  const [defaultSingerName, setDefaultSingerNameState] = useState<string>(() => {
+    return localStorage.getItem(STORAGE_KEYS.SINGER) || 'Vokalis Bintang';
+  });
+
+  const [roomId] = useState<string>(() => {
+    // Check URL first
+    const urlParams = new URLSearchParams(window.location.search);
+    const fromUrl = urlParams.get('room');
+    if (fromUrl) {
+      const clean = fromUrl.trim().toUpperCase();
+      localStorage.setItem(STORAGE_KEYS.ROOM_ID, clean);
+      return clean;
+    }
+    let stored = localStorage.getItem(STORAGE_KEYS.ROOM_ID);
+    if (!stored) {
+      stored = 'ROOM-' + Math.floor(1000 + Math.random() * 9000);
+      localStorage.setItem(STORAGE_KEYS.ROOM_ID, stored);
+    }
+    return stored.trim().toUpperCase();
+  });
+
+  // Player & Queue State
+  const [currentSong, setCurrentSong] = useState<Song | null>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEYS.CURRENT);
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
+
+  const [queue, setQueue] = useState<QueueItem[]>([]);
+
+  const [history, setHistory] = useState<Song[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEYS.HISTORY);
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  // Search State
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [suffixFilter, setSuffixFilter] = useState<SuffixFilter>('karaoke');
+  const [searchResults, setSearchResults] = useState<Song[]>(() => CURATED_LIBRARY['hits-indonesia'] || []);
+  const [isSearching, setIsSearching] = useState<boolean>(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const [isCuratedFallback, setIsCuratedFallback] = useState<boolean>(true);
+  const [activeCategory, setActiveCategory] = useState<string | null>('hits-indonesia');
+
+  // Player Controls
+  const [isPlaying, setIsPlaying] = useState<boolean>(false);
+  const [audioVolume, setAudioVolume] = useState<number>(85);
+  const [isMuted, setIsMuted] = useState<boolean>(false);
+  const playerRef = useRef<any>(null);
+
+  // Modals & Panels
+  const [isQueueOpenMobile, setIsQueueOpenMobile] = useState<boolean>(false);
+  const [isScoreModalOpen, setIsScoreModalOpen] = useState<boolean>(false);
+  const [currentScoreData, setCurrentScoreData] = useState<SongScoreData | null>(null);
+  const [isTvMode, setIsTvMode] = useState<boolean>(() => {
+    if (initialIsTvMode) return true;
+    if (typeof window === 'undefined') return false;
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get('mode') === 'tv' || urlParams.get('tv') === '1') return true;
+    return isSmartTvDevice();
+  });
+  const [remoteConnectedDevices, setRemoteConnectedDevices] = useState<number>(1);
+  const [remoteClientsList, setRemoteClientsList] = useState<RemoteClientInfo[]>([]);
+  const [remoteNotifications, setRemoteNotifications] = useState<RemoteNotification[]>([]);
+  const [activeReactions, setActiveReactions] = useState<ScreenReaction[]>([]);
+
+  // Smart MC Diskomlekau State
+  const [activeMcAnnouncement, setActiveMcAnnouncement] = useState<SmartMcAnnouncement | null>(null);
+  const [isMcSpeaking, setIsMcSpeaking] = useState<boolean>(false);
+  const [isPlayerEnded, setIsPlayerEnded] = useState<boolean>(false);
+  const isPlayerEndedRef = useRef<boolean>(false);
+  const isPlayingRef = useRef<boolean>(false);
+  const mcDismissTimerRef = useRef<any>(null);
+  const endTransitionTimerRef = useRef<any>(null);
+  const isAwaitingEndTransitionQueueSkipRef = useRef<boolean>(false);
+  const lastMcTriggerTimeRef = useRef<number>(0);
+
+  useEffect(() => {
+    isPlayingRef.current = isPlaying;
+  }, [isPlaying]);
+
+  useEffect(() => {
+    isPlayerEndedRef.current = isPlayerEnded;
+  }, [isPlayerEnded]);
+
+  // WebSocket and BroadcastChannel references
+  const wsRef = useRef<WebSocket | null>(null);
+  const broadcastRef = useRef<BroadcastChannel | null>(null);
+
+  // WebRTC Wireless Microphone Audio Receiver for Master
+  const {
+    activeMics: activeWirelessMics,
+    masterMicVolume,
+    setMasterMicVolume,
+    masterMicEcho,
+    setMasterMicEcho,
+    isMasterMicMuted,
+    setIsMasterMicMuted,
+    increaseVolume: increaseMicVolume,
+    decreaseVolume: decreaseMicVolume,
+    increaseEcho: increaseMicEcho,
+    decreaseEcho: decreaseMicEcho,
+    isAudioSuspended,
+    resumeAudio,
+    setClientMicVolume,
+    setClientMicEcho,
+    toggleClientMicMute,
+    handleSignalingMessage: handleWebRTCSignaling,
+    attachAudioStream,
+    cleanupSender,
+    musicDelayMs,
+    setMusicDelayMs,
+    connectMusicMediaElement,
+  } = useWebRTCAudioReceiver({
+    socketRef: wsRef,
+    roomId,
+  });
+
+  // PeerJS P2P TV Master references (Serverless WebRTC via 0.peerjs.com)
+  const peerRef = useRef<Peer | null>(null);
+  const peerConnectionsRef = useRef<Map<string, DataConnection>>(new Map());
+
+  // Reference to HTMLMediaElement for Web Audio API music analyzer
+  const musicMediaRef = useRef<HTMLMediaElement | null>(null);
+
+  // Active WebRTC microphone audio stream (from mobile broadcaster)
+  const activeMicStream =
+    activeWirelessMics.length > 0 && activeWirelessMics[0].stream
+      ? activeWirelessMics[0].stream
+      : null;
+
+  // Direct Hardware & IFrame Volume Controller: Applies volume changes instantly to YouTube player or any iframe in TV/Master
+  const applyHardwarePlayerVolume = useCallback((volume: number, muted?: boolean) => {
+    if (playerRef.current) {
+      try {
+        if (typeof playerRef.current.setVolume === 'function') {
+          playerRef.current.setVolume(volume);
+        }
+        if (muted && typeof playerRef.current.mute === 'function') {
+          playerRef.current.mute();
+        } else if (!muted && typeof playerRef.current.unMute === 'function') {
+          playerRef.current.unMute();
+        }
+      } catch {}
+    }
+    if (typeof document !== 'undefined') {
+      document.querySelectorAll('iframe').forEach((iframe) => {
+        try {
+          iframe.contentWindow?.postMessage(
+            JSON.stringify({ event: 'command', func: muted ? 'mute' : 'unMute', args: [] }),
+            '*'
+          );
+          iframe.contentWindow?.postMessage(
+            JSON.stringify({ event: 'command', func: 'setVolume', args: [volume] }),
+            '*'
+          );
+        } catch {}
+      });
+    }
+  }, []);
+
+  // Dewan Juri Prajurit (Multi-Client Collaborative Scoring)
+  const [juryVotes, setJuryVotes] = useState<JuryVote[]>([]);
+
+  // Reset jury votes and close any open score modal on song change
+  useEffect(() => {
+    setJuryVotes([]);
+    setIsScoreModalOpen(false);
+    setCurrentScoreData(null);
+  }, [currentSong?.id]);
+
+  // Web Audio API Karaoke Scoring Engine (dual AnalyserNode for mic and music)
+  const {
+    liveState: scoringState,
+    isScoringActive,
+    startScoring,
+    stopScoringAndGetResult,
+  } = useKaraokeScoring({
+    currentSong,
+    singerName: defaultSingerName,
+    isPlaying,
+    micStream: activeMicStream,
+    musicMediaElement: musicMediaRef.current,
+    triggerSoundFx: (type) => triggerSoundFx(type),
+    nextItem: queue.length > 0 ? queue[0] : undefined,
+    masterMicLevel: activeWirelessMics.length > 0 ? (activeWirelessMics[0].audioLevel || 0) : 0,
+  });
+
+  // Automatically start scoring session when song playback begins
+  useEffect(() => {
+    if (isPlaying && currentSong) {
+      startScoring();
+    }
+  }, [isPlaying, currentSong, startScoring]);
+
+  const addRemoteNotification = useCallback((message: string, senderName?: string, type: 'info' | 'success' | 'alert' = 'info') => {
+    const id = `notif-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+    const newNotif: RemoteNotification = {
+      id,
+      message,
+      senderName,
+      type,
+      timestamp: Date.now(),
+    };
+    setRemoteNotifications((prev) => [newNotif, ...prev.slice(0, 4)]);
+
+    setTimeout(() => {
+      setRemoteNotifications((prev) => prev.filter((n) => n.id !== id));
+    }, 4500);
+  }, []);
+
+  const removeRemoteNotification = useCallback((id: string) => {
+    setRemoteNotifications((prev) => prev.filter((n) => n.id !== id));
+  }, []);
+
+  // Persist storage helpers
+  const setDefaultSingerName = (name: string) => {
+    setDefaultSingerNameState(name);
+    localStorage.setItem(STORAGE_KEYS.SINGER, name);
+  };
+
+  // Keep localStorage updated
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEYS.QUEUE, JSON.stringify(queue));
+  }, [queue]);
+
+  useEffect(() => {
+    if (currentSong) {
+      localStorage.setItem(STORAGE_KEYS.CURRENT, JSON.stringify(currentSong));
+    }
+  }, [currentSong]);
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEYS.HISTORY, JSON.stringify(history));
+  }, [history]);
+
+  const isHydratedRef = useRef<boolean>(false);
+  const isServerUpdateRef = useRef<boolean>(false);
+  const lastLocalActionTimeRef = useRef<number>(0);
+
+  const applyServerCurrentSong = useCallback((nextSong: Song | null | undefined) => {
+    if (!nextSong || !nextSong.id) return;
+    setCurrentSong((prev) => {
+      if (prev && prev.id === nextSong.id && prev.title === nextSong.title) return prev;
+      isServerUpdateRef.current = true;
+      return nextSong;
+    });
+  }, []);
+
+  const applyServerQueue = useCallback((nextQueue: QueueItem[] | undefined) => {
+    if (!Array.isArray(nextQueue)) return;
+    setQueue((prev) => {
+      if (
+        prev.length === nextQueue.length &&
+        prev.every(
+          (q, i) =>
+            q.queueId === nextQueue[i]?.queueId &&
+            q.song?.id === nextQueue[i]?.song?.id &&
+            q.singerName === nextQueue[i]?.singerName
+        )
+      ) {
+        return prev;
+      }
+      isServerUpdateRef.current = true;
+      return nextQueue;
+    });
+  }, []);
+
+  const applyServerClients = useCallback((nextClients: RemoteClientInfo[] | undefined) => {
+    if (!Array.isArray(nextClients)) return;
+    setRemoteClientsList((prev) => {
+      if (
+        prev.length === nextClients.length &&
+        prev.every((c, i) => c.id === nextClients[i]?.id && c.name === nextClients[i]?.name)
+      ) {
+        return prev;
+      }
+      return nextClients;
+    });
+  }, []);
+
+  // Sync Master state to backend server so newly scanned Android clients get latest data
+  const syncStateToServer = useCallback(() => {
+    if (!isHydratedRef.current) return;
+
+    // 1. Send via WebSocket if open
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      try {
+        wsRef.current.send(
+          JSON.stringify({
+            type: 'SYNC_STATE',
+            roomId,
+            payload: {
+              currentSong,
+              isPlaying,
+              queue,
+              musicDelayMs,
+              musicVolume: audioVolume,
+              isMuted,
+            },
+          })
+        );
+      } catch (err) {
+        console.warn('WS sync state error:', err);
+      }
+    }
+
+    // 2. HTTP POST sync
+    fetch(`/api/room/${encodeURIComponent(roomId)}/sync`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        currentSong,
+        isPlaying,
+        queue,
+        musicDelayMs,
+        musicVolume: audioVolume,
+        isMuted,
+      }),
+    }).catch(() => {});
+  }, [roomId, currentSong, isPlaying, queue, musicDelayMs, audioVolume, isMuted]);
+
+  // Connect music media element to TV DelayNode pipeline on mount
+  useEffect(() => {
+    if (musicMediaRef.current) {
+      connectMusicMediaElement(musicMediaRef.current);
+    }
+  }, [connectMusicMediaElement]);
+
+  // Push server sync on local changes (debounced, suppressed when change originated from server)
+  useEffect(() => {
+    if (!isHydratedRef.current) return;
+    if (isServerUpdateRef.current) {
+      isServerUpdateRef.current = false;
+      return;
+    }
+    lastLocalActionTimeRef.current = Date.now();
+    const timer = setTimeout(syncStateToServer, 200);
+    return () => clearTimeout(timer);
+  }, [syncStateToServer]);
+
+  // Real-time WebSocket connection to server
+  useEffect(() => {
+    let socket: WebSocket | null = null;
+    let sseSource: EventSource | null = null;
+    let reconnectTimer: any = null;
+    let pingInterval: any = null;
+    let retryCount = 0;
+
+    const fetchRoomState = async () => {
+      try {
+        const res = await fetch(`/api/room/${encodeURIComponent(roomId)}/ping`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ clientId: 'master-cockpit', singerName: 'Layar Utama', role: 'master' }),
+        });
+        const data = await res.json();
+        if (data.success && data.room) {
+          const isRecentLocalAction = Date.now() - lastLocalActionTimeRef.current < 3500;
+          if (!isRecentLocalAction && !isPlayerEndedRef.current) {
+            if (data.room.currentSong) {
+              applyServerCurrentSong(data.room.currentSong);
+            }
+            if (typeof data.room.isPlaying === 'boolean') {
+              setIsPlaying((prev) => (prev === data.room.isPlaying ? prev : data.room.isPlaying));
+            }
+            if (Array.isArray(data.room.queue)) {
+              applyServerQueue(data.room.queue);
+            }
+          }
+          if (typeof data.room.musicDelayMs === 'number') {
+            setMusicDelayMs(data.room.musicDelayMs, false);
+          }
+          if (typeof data.room.musicVolume === 'number') {
+            const nextVol = Math.max(0, Math.min(100, Math.round(data.room.musicVolume)));
+            setAudioVolume((prev) => (prev === nextVol ? prev : nextVol));
+          }
+          if (typeof data.room.isMuted === 'boolean') {
+            setIsMuted((prev) => (prev === data.room.isMuted ? prev : data.room.isMuted));
+          }
+          if (data.clientCount !== undefined) {
+            setRemoteConnectedDevices((prev) => (prev === data.clientCount ? prev : data.clientCount));
+          }
+          if (Array.isArray(data.room.clients)) {
+            applyServerClients(data.room.clients);
+          }
+        }
+      } catch (e) {
+        // ignore
+      } finally {
+        isHydratedRef.current = true;
+      }
+    };
+
+    // Initial hydration from room server
+    fetchRoomState();
+
+    const connectWs = () => {
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+      }
+      try {
+        const wsUrl = getSignalingWebSocketUrl({
+          roomId,
+          role: 'master',
+          singerName: 'Layar Utama',
+        });
+
+        socket = new WebSocket(wsUrl);
+        wsRef.current = socket;
+
+        socket.onopen = () => {
+          retryCount = 0;
+          if (pingInterval) clearInterval(pingInterval);
+          // Ping every 5 seconds to maintain rock-solid connection
+          pingInterval = setInterval(() => {
+            if (socket && socket.readyState === WebSocket.OPEN) {
+              try {
+                socket.send(JSON.stringify({ type: 'PING', roomId, timestamp: Date.now() }));
+              } catch {}
+            }
+          }, 5000);
+        };
+
+        socket.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data);
+            if (!data || !data.type) return;
+
+            switch (data.type) {
+              case 'HEARTBEAT': {
+                try {
+                  socket?.send(JSON.stringify({ type: 'PONG', roomId, timestamp: Date.now() }));
+                } catch {}
+                break;
+              }
+
+              case 'INIT_STATE':
+              case 'STATE_UPDATE': {
+                if (data.payload) {
+                  if (data.payload.currentSong !== undefined && data.payload.currentSong !== null) {
+                    applyServerCurrentSong(data.payload.currentSong);
+                  }
+                  if (data.payload.isPlaying !== undefined) {
+                    setIsPlaying((prev) => (prev === data.payload.isPlaying ? prev : data.payload.isPlaying));
+                  }
+                  if (Array.isArray(data.payload.queue)) {
+                    applyServerQueue(data.payload.queue);
+                  }
+                  if (typeof data.payload.musicVolume === 'number') {
+                    const nextVol = Math.max(0, Math.min(100, Math.round(data.payload.musicVolume)));
+                    setAudioVolume((prev) => (prev === nextVol ? prev : nextVol));
+                  }
+                  if (typeof data.payload.isMuted === 'boolean') {
+                    setIsMuted((prev) => (prev === data.payload.isMuted ? prev : data.payload.isMuted));
+                  }
+                  if (data.payload.clientCount !== undefined) {
+                    setRemoteConnectedDevices((prev) => (prev === data.payload.clientCount ? prev : data.payload.clientCount));
+                  }
+                  if (Array.isArray(data.payload.clients)) {
+                    applyServerClients(data.payload.clients);
+                  }
+                }
+                break;
+              }
+
+              case 'ADD_QUEUE_ITEM': {
+                const item = data.payload?.item;
+                const sender = data.payload?.senderName || 'Prajurit (HP)';
+                if (Array.isArray(data.payload?.queue)) {
+                  setQueue(data.payload.queue);
+                } else if (item && item.song) {
+                  setQueue((prev) => {
+                    if (prev.some((q) => q.queueId === item.queueId)) return prev;
+                    if (item.priority) {
+                      return [item, ...prev];
+                    }
+                    return [...prev, item];
+                  });
+                }
+                audioFx.playDing();
+                const songTitle = item?.song?.title || 'lagu baru';
+                addRemoteNotification(
+                  `📱 ${sender} menambahkan lagu "${songTitle.slice(0, 30)}..." ke antrean!`,
+                  sender,
+                  'success'
+                );
+                break;
+              }
+
+              case 'REMOVE_QUEUE_ITEM': {
+                if (Array.isArray(data.payload?.queue)) {
+                  setQueue(data.payload.queue);
+                } else if (data.payload?.queueId) {
+                  const queueId = data.payload.queueId;
+                  setQueue((prev) => prev.filter((q) => q.queueId !== queueId));
+                }
+                break;
+              }
+
+              case 'SYNC_QUEUE': {
+                if (Array.isArray(data.payload?.queue)) {
+                  setQueue(data.payload.queue);
+                  const sender = data.payload?.senderName;
+                  if (sender && sender !== 'Layar Utama') {
+                    addRemoteNotification(`📱 ${sender} memperbarui urutan antrean lagu!`, sender, 'info');
+                  }
+                }
+                break;
+              }
+
+              case 'PLAY_NOW': {
+                if (data.payload?.song) {
+                  setCurrentSong(data.payload.song);
+                  setIsPlaying(true);
+                  const sender = data.payload?.singerName || 'HP';
+                  addRemoteNotification(`📱 ${sender} mengganti lagu: "${data.payload.song.title.slice(0, 30)}..."`, sender, 'info');
+                }
+                break;
+              }
+
+              case 'PLAY_SOUND_FX': {
+                const sound = data.payload?.sound;
+                const sender = data.payload?.senderName || 'Prajurit (HP)';
+                if (sound) {
+                  triggerSoundFx(sound, false, sender);
+                  addRemoteNotification(
+                    sound === 'boo' ? `👎 Sorak HUUU dari ${sender}!` : `🎉 Reaksi "${sound}" dari ${sender}!`,
+                    sender,
+                    sound === 'boo' ? 'alert' : 'info'
+                  );
+                }
+                break;
+              }
+
+              case 'CLIENT_COUNT_UPDATE': {
+                if (data.payload?.clientCount !== undefined) {
+                  setRemoteConnectedDevices(data.payload.clientCount);
+                }
+                if (Array.isArray(data.payload?.clients)) {
+                  setRemoteClientsList(data.payload.clients);
+                }
+                if (data.payload?.joinedName && data.payload.joinedName !== 'Layar Utama') {
+                  addRemoteNotification(`📱 ${data.payload.joinedName} berhasil terhubung dari HP!`, undefined, 'info');
+                }
+                break;
+              }
+
+              case 'SKIP_NEXT': {
+                if (data.payload?.currentSong) {
+                  setCurrentSong(data.payload.currentSong);
+                  setIsPlaying(true);
+                }
+                if (Array.isArray(data.payload?.queue)) {
+                  setQueue(data.payload.queue);
+                } else {
+                  skipNextSong(false);
+                }
+                break;
+              }
+
+              case 'TOGGLE_PAUSE': {
+                if (data.payload?.isPlaying !== undefined) {
+                  setIsPlaying(data.payload.isPlaying);
+                } else {
+                  setIsPlaying((prev) => !prev);
+                }
+                break;
+              }
+
+              case 'SET_VOLUME':
+              case 'SET_MUSIC_VOLUME': {
+                const vol = typeof data.payload === 'number' ? data.payload : data.payload?.volume;
+                const remoteMuted = typeof data.payload === 'object' ? data.payload?.isMuted : undefined;
+                const remoteSender = typeof data.payload === 'object' ? data.payload?.senderName : undefined;
+                if (typeof vol === 'number') {
+                  const clamped = Math.max(0, Math.min(100, Math.round(vol)));
+                  setAudioVolume(clamped);
+                  const effectiveMute = typeof remoteMuted === 'boolean' ? remoteMuted : false;
+                  if (typeof remoteMuted === 'boolean') {
+                    setIsMuted(remoteMuted);
+                  }
+                  applyHardwarePlayerVolume(clamped, effectiveMute);
+                } else if (typeof remoteMuted === 'boolean') {
+                  setIsMuted(remoteMuted);
+                  applyHardwarePlayerVolume(audioVolume, remoteMuted);
+                }
+                if (remoteSender && remoteSender !== 'Layar Utama') {
+                  addRemoteNotification(
+                    remoteMuted ? `🔇 ${remoteSender} membisukan musik TV` : `🔊 ${remoteSender} mengatur volume musik: ${vol ?? audioVolume}%`,
+                    remoteSender,
+                    'info'
+                  );
+                }
+                break;
+              }
+
+              case 'CLIENT_MIC_AUDIO_DATA':
+              case 'RTC_MIC_LEVEL':
+              case 'RTC_OFFER':
+              case 'RTC_ICE_CANDIDATE':
+              case 'RTC_MIC_PARAMS':
+              case 'MUSIC_SYNC_DELAY': {
+                handleWebRTCSignaling(data);
+                break;
+              }
+
+              case 'RTC_MIC_STATUS': {
+                handleWebRTCSignaling(data);
+                const isMicOn = data.payload?.isMicOn;
+                const sender = data.payload?.senderName || 'Prajurit (HP)';
+                if (isMicOn) {
+                  addRemoteNotification(
+                    `🎤 ${sender} mengaktifkan Mikrofon Wireless HP! Suara disiarkan langsung ke speaker.`,
+                    sender,
+                    'success'
+                  );
+                } else {
+                  addRemoteNotification(
+                    `🎤 ${sender} mematikan Mikrofon Wireless HP.`,
+                    sender,
+                    'info'
+                  );
+                }
+                break;
+              }
+
+              case 'SUBMIT_JURY_SCORE':
+              case 'SYNC_JURY_SCORES': {
+                if (Array.isArray(data.payload?.votes)) {
+                  setJuryVotes(data.payload.votes);
+                } else if (data.payload?.lastVote) {
+                  const newVote = data.payload.lastVote;
+                  const normName = (newVote.juryName || '').trim().toLowerCase();
+                  setJuryVotes((prev) => {
+                    const filtered = prev.filter(
+                      (v) => (v.juryName || '').trim().toLowerCase() !== normName && v.clientId !== newVote.clientId
+                    );
+                    return [...filtered, newVote];
+                  });
+                }
+                if (data.payload?.lastVote) {
+                  const v = data.payload.lastVote;
+                  addRemoteNotification(
+                    `⚖️ ${v.juryName} memberi nilai: ${v.score}!`,
+                    v.juryName,
+                    'info'
+                  );
+                }
+                break;
+              }
+
+              case 'TRIGGER_SMART_MC': {
+                const now = Date.now();
+                if (now - lastMcTriggerTimeRef.current >= 1000) {
+                  const sender = data.payload?.senderName || data.payload?.singerName || 'Prajurit (HP)';
+                  triggerSmartMcRef.current({
+                    singerName: data.payload?.singerName || defaultSingerName,
+                    songTitle: data.payload?.songTitle || currentSong?.title,
+                    score: typeof data.payload?.score === 'number' ? data.payload.score : currentScoreData?.totalScore,
+                    forceTier: data.payload?.forceTier,
+                    triggeredBy: sender,
+                    announcement: data.payload?.announcement
+                      ? { ...data.payload.announcement, isManual: true }
+                      : undefined,
+                    isManual: true,
+                    broadcast: false,
+                  });
+                  addRemoteNotification(`🎙️ ${sender} memanggil Pantun Smart MC Diskomlekau!`, sender, 'success');
+                }
+                break;
+              }
+            }
+          } catch (err) {
+            console.warn('Master WS parse error:', err);
+          }
+        };
+
+        socket.onclose = () => {
+          if (pingInterval) {
+            clearInterval(pingInterval);
+            pingInterval = null;
+          }
+          retryCount++;
+          const delay = Math.min(1500 * Math.pow(1.3, retryCount), 10000);
+          reconnectTimer = setTimeout(connectWs, delay);
+        };
+
+        socket.onerror = () => {
+          try {
+            socket?.close();
+          } catch {}
+        };
+      } catch (e) {
+        connectSSE();
+      }
+    };
+
+    const connectSSE = () => {
+      try {
+        sseSource = new EventSource(`/api/room/${encodeURIComponent(roomId)}/events?role=master&name=Layar%20Utama`);
+        sseSource.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data);
+            if (data.type === 'INIT_STATE' || data.type === 'STATE_UPDATE') {
+              if (data.payload?.currentSong !== undefined && data.payload.currentSong !== null) {
+                applyServerCurrentSong(data.payload.currentSong);
+              }
+              if (data.payload?.isPlaying !== undefined) {
+                setIsPlaying((prev) => (prev === data.payload.isPlaying ? prev : data.payload.isPlaying));
+              }
+              if (Array.isArray(data.payload?.queue)) {
+                applyServerQueue(data.payload.queue);
+              }
+              if (data.payload?.clientCount !== undefined) {
+                setRemoteConnectedDevices((prev) => (prev === data.payload.clientCount ? prev : data.payload.clientCount));
+              }
+              if (Array.isArray(data.payload?.clients)) {
+                applyServerClients(data.payload.clients);
+              }
+            } else if (data.type === 'SYNC_QUEUE' && Array.isArray(data.payload?.queue)) {
+              applyServerQueue(data.payload.queue);
+            } else if (data.type === 'PLAY_NOW' && data.payload?.song) {
+              applyServerCurrentSong(data.payload.song);
+              setIsPlaying(true);
+            } else if (data.type === 'SKIP_NEXT') {
+              if (data.payload?.currentSong) {
+                applyServerCurrentSong(data.payload.currentSong);
+                setIsPlaying(true);
+              }
+              if (Array.isArray(data.payload?.queue)) {
+                applyServerQueue(data.payload.queue);
+              } else {
+                skipNextSong();
+              }
+            } else if (data.type === 'ADD_QUEUE_ITEM') {
+              if (Array.isArray(data.payload?.queue)) {
+                applyServerQueue(data.payload.queue);
+              } else if (data.payload?.item) {
+                setQueue((prev) => {
+                  if (prev.some((q) => q.queueId === data.payload.item.queueId)) return prev;
+                  return data.payload.item.priority ? [data.payload.item, ...prev] : [...prev, data.payload.item];
+                });
+              }
+              audioFx.playDing();
+              addRemoteNotification(`📱 HP Prajurit menambahkan lagu ke antrean!`);
+            } else if (data.type === 'REMOVE_QUEUE_ITEM') {
+              if (Array.isArray(data.payload?.queue)) {
+                applyServerQueue(data.payload.queue);
+              } else if (data.payload?.queueId) {
+                setQueue((prev) => prev.filter((q) => q.queueId !== data.payload.queueId));
+              }
+            } else if (data.type === 'CLIENT_COUNT_UPDATE') {
+              if (data.payload?.clientCount !== undefined) {
+                setRemoteConnectedDevices((prev) => (prev === data.payload.clientCount ? prev : data.payload.clientCount));
+              }
+              if (Array.isArray(data.payload?.clients)) {
+                applyServerClients(data.payload.clients);
+              }
+            } else if (data.type === 'TRIGGER_SMART_MC') {
+              if (Date.now() - lastMcTriggerTimeRef.current >= 1000) {
+                const sender = data.payload?.senderName || data.payload?.singerName || 'Prajurit (HP)';
+                triggerSmartMcRef.current({
+                  singerName: data.payload?.singerName || defaultSingerName,
+                  songTitle: data.payload?.songTitle || currentSong?.title,
+                  score: typeof data.payload?.score === 'number' ? data.payload.score : undefined,
+                  forceTier: data.payload?.forceTier,
+                  triggeredBy: sender,
+                  announcement: data.payload?.announcement
+                    ? { ...data.payload.announcement, isManual: true }
+                    : undefined,
+                  isManual: true,
+                  broadcast: false,
+                });
+                addRemoteNotification(`🎙️ ${sender} memanggil Pantun Smart MC Diskomlekau!`, sender, 'success');
+              }
+            }
+          } catch (err) {}
+        };
+      } catch (err) {}
+    };
+
+    connectWs();
+
+    // Fast auto-reconnect on visibility change, network return, or window focus
+    const handleWakeReconnect = () => {
+      if (!socket || socket.readyState !== WebSocket.OPEN) {
+        connectWs();
+      }
+      fetchRoomState();
+    };
+
+    document.addEventListener('visibilitychange', handleWakeReconnect);
+    window.addEventListener('online', handleWakeReconnect);
+    window.addEventListener('focus', handleWakeReconnect);
+    window.addEventListener('pageshow', handleWakeReconnect);
+
+    // Lightweight fallback state check every 4 seconds (zero re-render when state is unchanged)
+    const pollTimer = setInterval(fetchRoomState, 4000);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleWakeReconnect);
+      window.removeEventListener('online', handleWakeReconnect);
+      window.removeEventListener('focus', handleWakeReconnect);
+      window.removeEventListener('pageshow', handleWakeReconnect);
+      clearInterval(pollTimer);
+      if (pingInterval) clearInterval(pingInterval);
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      if (socket) socket.close();
+      if (sseSource) sseSource.close();
+    };
+  }, [roomId, addRemoteNotification, applyServerCurrentSong, applyServerQueue, applyServerClients]);
+
+  // Broadcast Channel setup for instant multi-window / multi-screen sync on same browser
+  useEffect(() => {
+    if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+      const channel = new BroadcastChannel(`karaoke_channel_${roomId}`);
+      broadcastRef.current = channel;
+
+      channel.onmessage = (event) => {
+        const msg: WebSocketMessage = event.data;
+        if (!msg || !msg.type) return;
+
+        switch (msg.type) {
+          case 'ADD_QUEUE_ITEM':
+            if (Array.isArray(msg.payload?.queue)) {
+              setQueue(msg.payload.queue);
+            } else if (msg.payload?.item) {
+              setQueue((prev) => {
+                if (prev.some((q) => q.queueId === msg.payload.item.queueId)) return prev;
+                return msg.payload.item.priority ? [msg.payload.item, ...prev] : [...prev, msg.payload.item];
+              });
+            }
+            audioFx.playDing();
+            break;
+          case 'REMOVE_QUEUE_ITEM':
+            if (Array.isArray(msg.payload?.queue)) {
+              setQueue(msg.payload.queue);
+            } else if (msg.payload?.queueId) {
+              setQueue((prev) => prev.filter((q) => q.queueId !== msg.payload.queueId));
+            }
+            break;
+          case 'PLAY_NOW':
+            if (msg.payload?.song) {
+              setCurrentSong(msg.payload.song);
+              setIsPlaying(true);
+            }
+            break;
+          case 'SYNC_QUEUE':
+            if (Array.isArray(msg.payload?.queue)) {
+              setQueue(msg.payload.queue);
+            }
+            break;
+          case 'SKIP_NEXT':
+            skipNextSong(false);
+            break;
+          case 'TOGGLE_PAUSE':
+            if (msg.payload?.isPlaying !== undefined) {
+              setIsPlaying(msg.payload.isPlaying);
+            } else {
+              setIsPlaying((prev) => !prev);
+            }
+            break;
+          case 'PLAY_SOUND_FX':
+            if (msg.payload?.sound) {
+              triggerSoundFx(msg.payload.sound, false, msg.payload.senderName);
+            }
+            break;
+          case 'CLIENT_CONNECTED':
+            setRemoteConnectedDevices((prev) => prev + 1);
+            break;
+          case 'MUSIC_SYNC_DELAY':
+            if (typeof msg.payload?.delayMs === 'number') {
+              setMusicDelayMs(msg.payload.delayMs, false);
+            }
+            break;
+          case 'SET_MUSIC_VOLUME':
+            if (typeof msg.payload?.volume === 'number') {
+              setAudioVolume(Math.max(0, Math.min(100, Math.round(msg.payload.volume))));
+            }
+            if (typeof msg.payload?.isMuted === 'boolean') {
+              setIsMuted(msg.payload.isMuted);
+            }
+            break;
+          case 'SUBMIT_JURY_SCORE':
+          case 'SYNC_JURY_SCORES':
+            if (Array.isArray(msg.payload?.votes)) {
+              setJuryVotes(msg.payload.votes);
+            } else if (msg.payload?.lastVote) {
+              const newVote = msg.payload.lastVote;
+              const normName = (newVote.juryName || '').trim().toLowerCase();
+              setJuryVotes((prev) => {
+                const filtered = prev.filter(
+                  (v) => (v.juryName || '').trim().toLowerCase() !== normName && v.clientId !== newVote.clientId
+                );
+                return [...filtered, newVote];
+              });
+            }
+            break;
+          case 'TRIGGER_SMART_MC':
+            if (Date.now() - lastMcTriggerTimeRef.current >= 1000) {
+              triggerSmartMcRef.current({
+                singerName: msg.payload?.singerName,
+                songTitle: msg.payload?.songTitle,
+                score: msg.payload?.score,
+                forceTier: msg.payload?.forceTier,
+                announcement: msg.payload?.announcement
+                  ? { ...msg.payload.announcement, isManual: true }
+                  : undefined,
+                isManual: true,
+                broadcast: false,
+              });
+            }
+            break;
+        }
+      };
+
+      return () => {
+        channel.close();
+      };
+    }
+  }, [roomId]);
+
+  // Send message helper across sync channels
+  const broadcastMessage = useCallback(
+    (type: WebSocketMessage['type'], payload?: any) => {
+      // 1. BroadcastChannel (same browser tabs)
+      if (broadcastRef.current) {
+        broadcastRef.current.postMessage({
+          type,
+          roomId,
+          payload,
+          timestamp: Date.now(),
+        });
+      }
+
+      // 2. WebSocket (remote network devices)
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        try {
+          wsRef.current.send(
+            JSON.stringify({
+              type,
+              roomId,
+              payload,
+              timestamp: Date.now(),
+            })
+          );
+        } catch (e) {
+          // ignore
+        }
+      }
+    },
+    [roomId]
+  );
+
+  // Sound effects runner with on-screen visual reaction (HUUU, Cheer, Applause, etc.)
+  const triggerSoundFx = useCallback(
+    (type: SoundFxType | string, broadcast = true, senderName?: string) => {
+      const sender = senderName || defaultSingerName || 'Prajurit';
+
+      const reactionMeta: Record<string, { label: string; emoji: string }> = {
+        boo: { label: 'KASIH HUUU', emoji: '👎' },
+        cheer: { label: 'SORAK GEMBIRA', emoji: '🎉' },
+        applause: { label: 'TEPUK TANGAN', emoji: '👏' },
+        airhorn: { label: 'TEROMPET DJ', emoji: '📢' },
+        laugh: { label: 'KETAWA NGAKAK', emoji: '😂' },
+        ding: { label: 'LEMPAR KURSI', emoji: '🪑' },
+        rimshot: { label: 'DRUM ROLL', emoji: '🥁' },
+        sawer: { label: 'SAWER DULU', emoji: '💸' },
+        hormat: { label: 'KASIH HORMAT', emoji: '🫡' },
+        telor: { label: 'LEMPAR TELUR', emoji: '🥚' },
+      };
+
+      if (type !== 'score_reveal') {
+        const meta = reactionMeta[type] || { label: type.toUpperCase(), emoji: '✨' };
+        const reactionId = `rx-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+        const newReaction: ScreenReaction = {
+          id: reactionId,
+          type: type as SoundFxType,
+          label: meta.label,
+          emoji: meta.emoji,
+          senderName: sender,
+          timestamp: Date.now(),
+        };
+
+        setActiveReactions((prev) => [...prev.slice(-3), newReaction]);
+        setTimeout(() => {
+          setActiveReactions((prev) => prev.filter((r) => r.id !== reactionId));
+        }, 3000);
+      }
+
+      switch (type) {
+        case 'score_reveal':
+          // Suara / musik saat skor muncul dihilangkan
+          break;
+        case 'applause':
+          audioFx.playApplause();
+          break;
+        case 'cheer':
+          audioFx.playCheer();
+          break;
+        case 'sawer':
+          audioFx.playSawer();
+          break;
+        case 'hormat':
+          audioFx.playHormat();
+          break;
+        case 'telor':
+          audioFx.playTelor();
+          break;
+        case 'airhorn':
+          audioFx.playAirhorn();
+          break;
+        case 'ding':
+          audioFx.playDing();
+          break;
+        case 'rimshot':
+          audioFx.playRimshot();
+          break;
+        case 'boo':
+          audioFx.playBoo();
+          break;
+        case 'laugh':
+          audioFx.playLaugh();
+          break;
+      }
+      if (broadcast) {
+        broadcastMessage('PLAY_SOUND_FX', { sound: type, senderName: sender });
+      }
+    },
+    [broadcastMessage, defaultSingerName]
+  );
+
+  // Helper to calculate average score and formula from all jury votes
+  const getJuryAverageSummary = useCallback((): JuryScoreSummary => {
+    if (juryVotes.length === 0) {
+      return {
+        votes: [],
+        averageScore: 0,
+        totalVoters: 0,
+        calculationFormula: 'Belum ada penilaian prajurit',
+      };
+    }
+    const sum = juryVotes.reduce((acc, v) => acc + v.score, 0);
+    const avg = Math.round(sum / juryVotes.length);
+    const formula = `skor total ${juryVotes.map((v) => v.score).join('+')}=${sum}:${juryVotes.length}= ${avg}`;
+    return {
+      votes: juryVotes,
+      averageScore: avg,
+      totalVoters: juryVotes.length,
+      calculationFormula: formula,
+    };
+  }, [juryVotes]);
+
+  // Submit soldier jury vote (accessible from client or master)
+  const submitJuryVote = useCallback(
+    (score: number, juryName?: string, clientId?: string) => {
+      const clampedScore = Math.max(0, Math.min(100, Math.round(score)));
+      const jName = (juryName || defaultSingerName || 'Prajurit (HP)').trim();
+      const normName = jName.toLowerCase();
+      const cId = normName || clientId || `juri-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+      const vote: JuryVote = {
+        clientId: cId,
+        juryName: jName,
+        score: clampedScore,
+        songId: currentSong?.id || '',
+        songTitle: currentSong?.title || '',
+        submittedAt: Date.now(),
+      };
+
+      setJuryVotes((prev) => {
+        const filtered = prev.filter(
+          (v) => (v.juryName || '').trim().toLowerCase() !== normName && v.clientId !== cId
+        );
+        const nextVotes = [...filtered, vote];
+
+        // 1. Broadcast via BroadcastChannel & WebSocket
+        broadcastMessage('SUBMIT_JURY_SCORE', {
+          score: clampedScore,
+          juryName: jName,
+          clientId: cId,
+          songId: currentSong?.id,
+          lastVote: vote,
+          votes: nextVotes,
+        });
+
+        // 2. Broadcast via PeerJS
+        peerConnectionsRef.current.forEach((conn) => {
+          if (conn.open) {
+            conn.send({
+              action: 'SYNC_JURY_SCORES',
+              payload: { votes: nextVotes, songId: currentSong?.id, lastVote: vote },
+            });
+          }
+        });
+
+        return nextVotes;
+      });
+
+      // 3. HTTP Fallback
+      fetch(`/api/room/${encodeURIComponent(roomId)}/jury-vote`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          score: clampedScore,
+          juryName: jName,
+          clientId: cId,
+          songId: currentSong?.id,
+        }),
+      }).catch(() => {});
+    },
+    [defaultSingerName, currentSong, broadcastMessage, roomId]
+  );
+
+  // Execute Search
+  const executeSearch = useCallback(
+    async (queryOverride?: string, categoryId?: string) => {
+      const q = queryOverride !== undefined ? queryOverride : searchQuery;
+      if (!q.trim() && !categoryId) return;
+
+      setIsSearching(true);
+      setSearchError(null);
+      if (categoryId) {
+        setActiveCategory(categoryId);
+      } else {
+        setActiveCategory(null);
+      }
+
+      // 1. Direct link / Video ID detection: if user pastes YouTube link in search bar, resolve directly
+      const directId = extractYoutubeVideoId(q);
+      if (directId) {
+        setIsSearching(true);
+        try {
+          const oembed = await fetchOEmbedInfo(directId);
+          const directSong: Song = {
+            id: directId,
+            title: oembed?.title || `YouTube Video (${directId})`,
+            channelTitle: oembed?.author_name || 'YouTube Video',
+            thumbnailUrl: `https://img.youtube.com/vi/${directId}/hqdefault.jpg`,
+            isCurated: false,
+          };
+          setSearchResults([directSong]);
+          setIsCuratedFallback(false);
+          setIsSearching(false);
+          return;
+        } catch {
+          // fallback to regular search
+        }
+      }
+
+      const res = await searchKaraokeSongs(q, suffixFilter, categoryId);
+      setSearchResults(res.songs);
+      setIsCuratedFallback(res.isCuratedFallback);
+      if (res.error) {
+        setSearchError(res.error);
+      }
+      setIsSearching(false);
+    },
+    [searchQuery, suffixFilter]
+  );
+
+  // Add Direct YouTube Video Link / ID with automatic title resolution and optional play immediately
+  const addDirectVideoUrl = useCallback(
+    async (urlOrId: string, singerName?: string, playImmediately = false): Promise<boolean> => {
+      const videoId = extractYoutubeVideoId(urlOrId);
+      if (!videoId) return false;
+
+      let title = `Video YouTube (${videoId})`;
+      let channelTitle = 'YouTube Video';
+
+      try {
+        const oembed = await fetchOEmbedInfo(videoId);
+        if (oembed?.title) {
+          title = oembed.title;
+        }
+        if (oembed?.author_name) {
+          channelTitle = oembed.author_name;
+        }
+      } catch (e) {
+        console.warn('oEmbed fetch error:', e);
+      }
+
+      const directSong: Song = {
+        id: videoId,
+        title,
+        channelTitle,
+        thumbnailUrl: `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`,
+        isCurated: false,
+      };
+
+      const sName = singerName?.trim() || defaultSingerName;
+
+      if (playImmediately) {
+        if (currentSong) {
+          setHistory((prev) => [currentSong, ...prev.slice(0, 19)]);
+        }
+        setCurrentSong(directSong);
+        setIsPlaying(true);
+        broadcastMessage('PLAY_NOW', { song: directSong, singerName: sName });
+        fetch(`/api/room/${encodeURIComponent(roomId)}/play-now`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ song: directSong, singerName: sName }),
+        }).catch(() => {});
+        audioFx.playDing();
+        return true;
+      }
+
+      const qId = `q-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+      const newItem: QueueItem = {
+        queueId: qId,
+        song: directSong,
+        singerName: sName,
+        addedAt: Date.now(),
+      };
+
+      setQueue((prev) => [...prev, newItem]);
+      broadcastMessage('ADD_QUEUE_ITEM', { item: newItem });
+      fetch(`/api/room/${encodeURIComponent(roomId)}/queue`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ song: directSong, singerName: sName, queueId: qId }),
+      }).catch(() => {});
+      audioFx.playDing();
+      return true;
+    },
+    [defaultSingerName, broadcastMessage, currentSong, roomId]
+  );
+
+  // Add to Queue
+  const addToQueue = useCallback(
+    (song: Song, singerName?: string, playNext = false, customQueueId?: string) => {
+      const sName = singerName?.trim() || defaultSingerName;
+      const qId = customQueueId?.trim() || `q-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+      const newItem: QueueItem = {
+        queueId: qId,
+        song,
+        singerName: sName,
+        addedAt: Date.now(),
+        priority: playNext,
+      };
+
+      setQueue((prev) => {
+        // Prevent duplicate queueId or exact same song+singer within 3 seconds
+        if (
+          prev.some(
+            (q) =>
+              q.queueId === qId ||
+              (q.song.id === song.id && q.singerName === sName && Date.now() - (q.addedAt || 0) < 3000)
+          )
+        ) {
+          return prev;
+        }
+        if (playNext) {
+          return [newItem, ...prev];
+        }
+        return [...prev, newItem];
+      });
+
+      if (!currentSong) {
+        setCurrentSong(song);
+        setIsPlaying(true);
+      }
+
+      broadcastMessage('ADD_QUEUE_ITEM', { item: newItem, song, singerName: sName, priority: playNext, queueId: qId });
+      fetch(`/api/room/${encodeURIComponent(roomId)}/queue`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ song, singerName: sName, priority: playNext, queueId: qId }),
+      }).catch(() => {});
+      audioFx.playDing();
+    },
+    [defaultSingerName, broadcastMessage, roomId, currentSong]
+  );
+
+  // Remove from Queue
+  const removeFromQueue = useCallback((queueId: string) => {
+    setQueue((prev) => prev.filter((item) => item.queueId !== queueId));
+    broadcastMessage('REMOVE_QUEUE_ITEM', { queueId });
+    fetch(`/api/room/${encodeURIComponent(roomId)}/remove`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ queueId }),
+    }).catch(() => {});
+  }, [broadcastMessage, roomId]);
+
+  // Reorder Queue
+  const moveQueueItem = useCallback(
+    (fromIndex: number, toIndex: number) => {
+      setQueue((prev) => {
+        if (toIndex < 0 || toIndex >= prev.length) return prev;
+        const updated = [...prev];
+        const [moved] = updated.splice(fromIndex, 1);
+        updated.splice(toIndex, 0, moved);
+        const targetQueueId = moved?.queueId;
+        broadcastMessage('SYNC_QUEUE', { queue: updated });
+        fetch(`/api/room/${encodeURIComponent(roomId)}/reorder`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ fromIndex, toIndex, queueId: targetQueueId, singerName: defaultSingerName }),
+        }).catch(() => {});
+        return updated;
+      });
+    },
+    [broadcastMessage, roomId, defaultSingerName]
+  );
+
+  // Clear Queue
+  const clearQueue = useCallback(() => {
+    setQueue([]);
+    broadcastMessage('SYNC_QUEUE', { queue: [] });
+  }, [broadcastMessage]);
+
+  // Update singer name
+  const updateSingerName = useCallback((queueId: string, newSinger: string) => {
+    setQueue((prev) =>
+      prev.map((item) => (item.queueId === queueId ? { ...item, singerName: newSinger } : item))
+    );
+  }, []);
+
+  // Helper to immediately stop Smart MC speech and hide banner when playback starts/resumes
+  const clearSmartMcImmediately = useCallback(() => {
+    if (mcDismissTimerRef.current) {
+      clearTimeout(mcDismissTimerRef.current);
+      mcDismissTimerRef.current = null;
+    }
+    if (endTransitionTimerRef.current) {
+      clearTimeout(endTransitionTimerRef.current);
+      endTransitionTimerRef.current = null;
+    }
+    isAwaitingEndTransitionQueueSkipRef.current = false;
+    stopSmartMcSpeech();
+    setIsMcSpeaking(false);
+    setActiveMcAnnouncement(null);
+  }, []);
+
+  // Play Song Immediately
+  const playSongNow = useCallback(
+    (song: Song, singerName?: string) => {
+      const sName = singerName || defaultSingerName;
+      // Larangan Mutlak di Tengah Lagu: Hentikan Smart MC & speechSynthesis saat lagu mulai diputar
+      clearSmartMcImmediately();
+      isPlayerEndedRef.current = false;
+      setIsPlayerEnded(false);
+      isPlayingRef.current = true;
+
+      if (currentSong) {
+        setHistory((prev) => [currentSong, ...prev.slice(0, 19)]);
+      }
+      setCurrentSong(song);
+      setIsPlaying(true);
+
+      // Trigger immediate playback on playerRef and DOM iframes
+      try {
+        if (playerRef.current) {
+          if (!isMuted) {
+            playerRef.current.unMute?.();
+            playerRef.current.setVolume?.(audioVolume);
+          }
+          playerRef.current.playVideo?.();
+        }
+      } catch {}
+
+      try {
+        const iframes = document.querySelectorAll('iframe');
+        iframes.forEach((ifr) => {
+          try {
+            ifr.contentWindow?.postMessage(
+              JSON.stringify({ event: 'command', func: isMuted ? 'mute' : 'unMute', args: [] }),
+              '*'
+            );
+            ifr.contentWindow?.postMessage(
+              JSON.stringify({ event: 'command', func: 'setVolume', args: [audioVolume] }),
+              '*'
+            );
+            ifr.contentWindow?.postMessage(
+              JSON.stringify({ event: 'command', func: 'playVideo', args: [] }),
+              '*'
+            );
+          } catch {}
+        });
+      } catch {}
+
+      broadcastMessage('PLAY_NOW', { song, singerName: sName });
+      fetch(`/api/room/${encodeURIComponent(roomId)}/play-now`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ song, singerName: sName }),
+      }).catch(() => {});
+    },
+    [currentSong, broadcastMessage, roomId, defaultSingerName, playerRef, isMuted, audioVolume, clearSmartMcImmediately]
+  );
+
+  // Guard against rapid multi-click or simultaneous video events skipping twice
+  const lastSkipTimestampRef = useRef<number>(0);
+
+  // Skip to next song in queue
+  const skipNextSong = useCallback(
+    (broadcast = true) => {
+      const now = Date.now();
+      if (now - lastSkipTimestampRef.current < 1500) {
+        return;
+      }
+      lastSkipTimestampRef.current = now;
+
+      if (endTransitionTimerRef.current) {
+        clearTimeout(endTransitionTimerRef.current);
+        endTransitionTimerRef.current = null;
+      }
+      isAwaitingEndTransitionQueueSkipRef.current = false;
+
+      setQueue((prevQueue) => {
+        if (prevQueue.length === 0) {
+          // Jika antrean habis, kembali ke mode standby (jangan putar lagu sembarangan)
+          if (currentSong) {
+            setHistory((prevHist) => [currentSong, ...prevHist.slice(0, 19)]);
+          }
+          setCurrentSong(null);
+          isPlayingRef.current = false;
+          setIsPlaying(false);
+          try {
+            localStorage.removeItem(STORAGE_KEYS.CURRENT);
+          } catch {}
+          if (broadcast) {
+            broadcastMessage('SKIP_NEXT', { currentSong: null, queue: [] });
+            broadcastMessage('SYNC_QUEUE', { queue: [] });
+            fetch(`/api/room/${encodeURIComponent(roomId)}/skip`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ singerName: defaultSingerName }),
+            }).catch(() => {});
+          }
+          return [];
+        }
+        const [nextItem, ...remaining] = prevQueue;
+        // Larangan Mutlak di Tengah Lagu: Saat lagu berikutnya mulai diputar, sembunyikan Smart MC & hentikan suara
+        clearSmartMcImmediately();
+        isPlayerEndedRef.current = false;
+        setIsPlayerEnded(false);
+        isPlayingRef.current = true;
+        hasTriggered60sScoreRef.current = null;
+        hasTriggeredScoreRef.current = null;
+        songPlaybackStartRef.current = Date.now();
+        latestRealTimeRef.current = 0;
+
+        if (currentSong) {
+          setHistory((prevHist) => [currentSong, ...prevHist.slice(0, 19)]);
+        }
+        setCurrentSong(nextItem.song);
+        setIsPlaying(true);
+
+        // Immediate play trigger on skip
+        try {
+          if (playerRef.current) {
+            if (!isMuted) {
+              playerRef.current.unMute?.();
+              playerRef.current.setVolume?.(audioVolume);
+            }
+            playerRef.current.playVideo?.();
+          }
+        } catch {}
+
+        try {
+          const iframes = document.querySelectorAll('iframe');
+          iframes.forEach((ifr) => {
+            try {
+              ifr.contentWindow?.postMessage(
+                JSON.stringify({ event: 'command', func: isMuted ? 'mute' : 'unMute', args: [] }),
+                '*'
+              );
+              ifr.contentWindow?.postMessage(
+                JSON.stringify({ event: 'command', func: 'setVolume', args: [audioVolume] }),
+                '*'
+              );
+              ifr.contentWindow?.postMessage(
+                JSON.stringify({ event: 'command', func: 'playVideo', args: [] }),
+                '*'
+              );
+            } catch {}
+          });
+        } catch {}
+
+        if (broadcast) {
+          broadcastMessage('PLAY_NOW', { song: nextItem.song, singerName: nextItem.singerName });
+          broadcastMessage('SYNC_QUEUE', { queue: remaining });
+          fetch(`/api/room/${encodeURIComponent(roomId)}/skip`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ singerName: defaultSingerName, nextSong: nextItem.song, queueId: nextItem.queueId }),
+          }).catch(() => {});
+        }
+        return remaining;
+      });
+    },
+    [currentSong, broadcastMessage, roomId, defaultSingerName, playerRef, isMuted, audioVolume, clearSmartMcImmediately]
+  );
+
+  // Toggle Play / Pause synchronized across TV, Tablet, and Mobile
+  const togglePlayPause = useCallback(
+    (broadcast = true) => {
+      setIsPlaying((prev) => {
+        const next = !prev;
+        isPlayingRef.current = next;
+        if (next) {
+          // Larangan Mutlak di Tengah Lagu: Jika pemutar kembali PLAY, blokir/sembunyikan Smart MC & hentikan speechSynthesis
+          isPlayerEndedRef.current = false;
+          setIsPlayerEnded(false);
+          clearSmartMcImmediately();
+        }
+        if (broadcast) {
+          broadcastMessage('TOGGLE_PAUSE', { isPlaying: next });
+          fetch(`/api/room/${encodeURIComponent(roomId)}/toggle-pause`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ isPlaying: next, senderName: defaultSingerName }),
+          }).catch(() => {});
+        }
+        return next;
+      });
+    },
+    [broadcastMessage, roomId, defaultSingerName, clearSmartMcImmediately]
+  );
+
+  const generateScoreData = useCallback((song: Song, singer: string, nextItem?: QueueItem): SongScoreData => {
+    const totalScore = 80;
+    const grade: 'SS' | 'S' | 'A' | 'B' | 'C' = 'A';
+    const quote = getScoreQuote(totalScore);
+
+    return {
+      song,
+      singerName: singer || defaultSingerName,
+      totalScore,
+      grade,
+      rankTitle: quote,
+      commentary: quote,
+      pitchAccuracy: totalScore,
+      vocalPower: totalScore,
+      stagePresence: totalScore,
+      combatSpirit: totalScore,
+      nextSong: nextItem?.song,
+      nextSingerName: nextItem?.singerName,
+      evaluatedAt: Date.now(),
+    };
+  }, [defaultSingerName]);
+
+  // Replay current song
+  const replayCurrentSong = useCallback(() => {
+    clearSmartMcImmediately();
+    isPlayerEndedRef.current = false;
+    setIsPlayerEnded(false);
+    isPlayingRef.current = true;
+    hasTriggered60sScoreRef.current = null;
+    hasTriggeredScoreRef.current = null;
+    songPlaybackStartRef.current = Date.now();
+    latestRealTimeRef.current = 0;
+
+    if (playerRef.current && typeof playerRef.current.seekTo === 'function') {
+      playerRef.current.seekTo(0);
+      playerRef.current.playVideo();
+      setIsPlaying(true);
+    }
+  }, [clearSmartMcImmediately]);
+
+  const buildDefaultJuryVotes = useCallback(
+    (targetAvg: number, songId = '', songTitle = ''): JuryVote[] => {
+      const defaultNames = ['iwan', 'rudi', 'rojikan', 'tomas', 'awan'];
+      const clamped = Math.max(0, Math.min(100, Math.round(targetAvg)));
+      return defaultNames.map((name, idx) => ({
+        clientId: `default-juri-${idx + 1}`,
+        juryName: name,
+        score: clamped,
+        songId,
+        songTitle,
+        submittedAt: Date.now(),
+      }));
+    },
+    []
+  );
+
+  // Smart MC Diskomlekau Controllers (100% Local Pantun & Indonesian Speech Synthesis)
+  const dismissSmartMc = useCallback(() => {
+    const shouldAdvanceQueue = isAwaitingEndTransitionQueueSkipRef.current;
+    clearSmartMcImmediately();
+    if (shouldAdvanceQueue) {
+      lastSkipTimestampRef.current = 0;
+      skipNextSong();
+    }
+  }, [clearSmartMcImmediately, skipNextSong]);
+
+  // KETENTUAN 1 (Larangan Mutlak di Tengah Lagu):
+  // Saat lagu mulai atau kembali diputar (isPlaying === true), reset status ENDED dan hentikan Smart MC + speechSynthesis.
+  useEffect(() => {
+    if (isPlaying && currentSong?.id) {
+      isPlayerEndedRef.current = false;
+      setIsPlayerEnded(false);
+      clearSmartMcImmediately();
+    }
+  }, [isPlaying, currentSong?.id, clearSmartMcImmediately]);
+
+  // Selama lagu sedang diputar (isPlaying === true dan status pemutar bukan ENDED),
+  // Smart MC otomatis wajib diblokir/disembunyikan total, serta hentikan suara speechSynthesis.
+  useEffect(() => {
+    if (isPlaying && !isPlayerEnded && activeMcAnnouncement && !activeMcAnnouncement.isManual) {
+      clearSmartMcImmediately();
+    }
+  }, [isPlaying, isPlayerEnded, activeMcAnnouncement, clearSmartMcImmediately]);
+
+  const replaySmartMcSpeech = useCallback(() => {
+    if (!activeMcAnnouncement) return;
+    if (mcDismissTimerRef.current) {
+      clearTimeout(mcDismissTimerRef.current);
+    }
+    mcDismissTimerRef.current = setTimeout(() => {
+      setActiveMcAnnouncement(null);
+      setIsMcSpeaking(false);
+    }, 7000);
+
+    speakSmartMcIndonesian(
+      activeMcAnnouncement.tier,
+      () => setIsMcSpeaking(true),
+      () => setIsMcSpeaking(false)
+    );
+  }, [activeMcAnnouncement]);
+
+  const triggerSmartMc = useCallback(
+    (options?: {
+      singerName?: string;
+      songTitle?: string;
+      score?: number | null;
+      forceTier?: SmartMcTier;
+      triggeredBy?: string;
+      announcement?: SmartMcAnnouncement;
+      broadcast?: boolean;
+      isManual?: boolean;
+      nextSongTitle?: string;
+      onSpeechEnd?: () => void;
+    }) => {
+      const isManualTrigger = Boolean(options?.isManual || options?.announcement?.isManual);
+
+      // KETENTUAN 1 (Larangan Mutlak di Tengah Lagu):
+      // Selama lagu sedang diputar (isPlaying === true dan status pemutar bukan ENDED),
+      // pemicu otomatis Smart MC wajib diblokir total dan suara audio MC dihentikan.
+      if (!isManualTrigger && isPlayingRef.current && !isPlayerEndedRef.current) {
+        stopSmartMcSpeech();
+        setIsMcSpeaking(false);
+        setActiveMcAnnouncement(null);
+        return;
+      }
+
+      lastMcTriggerTimeRef.current = Date.now();
+      const effectiveScore =
+        options?.score !== undefined
+          ? options.score
+          : currentScoreData?.totalScore ??
+            (juryVotes.length > 0
+              ? Math.round(juryVotes.reduce((acc, v) => acc + v.score, 0) / juryVotes.length)
+              : undefined);
+
+      const baseAnnouncement =
+        options?.announcement ||
+        generateSmartMcAnnouncement({
+          singerName: options?.singerName || defaultSingerName,
+          songTitle: options?.songTitle || currentSong?.title || 'Lagu Pilihan Prajurit',
+          score: effectiveScore,
+          forceTier: options?.forceTier,
+          triggeredBy: options?.triggeredBy || (isManualTrigger ? 'Pantun MC (HP)' : 'Akhir Lagu'),
+          isManual: isManualTrigger,
+          nextSongTitle: options?.nextSongTitle,
+        });
+
+      const announcement: SmartMcAnnouncement = {
+        ...baseAnnouncement,
+        isManual: isManualTrigger,
+        nextSongTitle: options?.nextSongTitle ?? baseAnnouncement.nextSongTitle,
+      };
+
+      setActiveMcAnnouncement(announcement);
+
+      if (mcDismissTimerRef.current) {
+        clearTimeout(mcDismissTimerRef.current);
+      }
+      // Otomatis sembunyikan banner Smart MC setelah 7 detik (6-8 detik) agar tidak menutupi layar TV terus-menerus
+      mcDismissTimerRef.current = setTimeout(() => {
+        setActiveMcAnnouncement(null);
+        setIsMcSpeaking(false);
+      }, 7000);
+
+      speakSmartMcIndonesian(
+        announcement.tier,
+        () => setIsMcSpeaking(true),
+        () => {
+          setIsMcSpeaking(false);
+          options?.onSpeechEnd?.();
+        }
+      );
+
+      if (options?.broadcast) {
+        broadcastMessage('TRIGGER_SMART_MC', {
+          announcement,
+          singerName: announcement.singerName,
+          songTitle: announcement.songTitle,
+          score: announcement.score,
+          isManual: isManualTrigger,
+        });
+      }
+    },
+    [currentScoreData, juryVotes, defaultSingerName, currentSong, broadcastMessage]
+  );
+
+  const triggerSmartMcRef = useRef(triggerSmartMc);
+  useEffect(() => {
+    triggerSmartMcRef.current = triggerSmartMc;
+  }, [triggerSmartMc]);
+
+  // Trigger song scoring evaluation on demand (TANPA memicu Smart MC otomatis agar tidak mengganggu lagu)
+  const evaluateCurrentSong = useCallback(() => {
+    if (currentSong) {
+      const nextItem = queue.length > 0 ? queue[0] : undefined;
+      const autoScore = stopScoringAndGetResult() || generateScoreData(currentSong, defaultSingerName, nextItem);
+      const effectiveVotes =
+        juryVotes.length > 0
+          ? [...juryVotes]
+          : buildDefaultJuryVotes(autoScore.totalScore, currentSong.id, currentSong.title);
+      const sum = effectiveVotes.reduce((acc, v) => acc + v.score, 0);
+      const finalScore = Math.round(sum / effectiveVotes.length);
+      const quote = getScoreQuote(finalScore);
+
+      const scoreData: SongScoreData = {
+        ...autoScore,
+        totalScore: finalScore,
+        grade: finalScore >= 95 ? 'SS' : finalScore >= 88 ? 'S' : finalScore >= 80 ? 'A' : finalScore >= 65 ? 'B' : 'C',
+        rankTitle: quote,
+        commentary: quote,
+        juryVotes: effectiveVotes,
+        juryAverageScore: finalScore,
+        isJuryAverage: true,
+      };
+      setCurrentScoreData(scoreData);
+      setIsScoreModalOpen(true);
+    }
+  }, [currentSong, defaultSingerName, queue, stopScoringAndGetResult, generateScoreData, juryVotes, buildDefaultJuryVotes]);
+
+  // Automated song score trigger locks & playback elapsed trackers
+  const hasTriggered60sScoreRef = useRef<string | null>(null);
+  const hasTriggeredScoreRef = useRef<string | null>(null);
+  const songPlaybackStartRef = useRef<number>(Date.now());
+  const latestRealTimeRef = useRef<number>(0);
+
+  // KETENTUAN 2 (Hanya Saat Lagu Selesai / Transisi ENDED):
+  // Smart MC otomatis muncul sebagai banner elegan di layar Master TV dan bersuara bahasa Indonesia
+  // HANYA ketika lagu yang diputar benar-benar selesai (ENDED) atau saat transisi ke antrean lagu berikutnya.
+  const handlePlayerEnded = useCallback(() => {
+    if (currentSong) {
+      if (hasTriggeredScoreRef.current === `${currentSong.id}-ended`) return;
+      hasTriggeredScoreRef.current = `${currentSong.id}-ended`;
+      lastLocalActionTimeRef.current = Date.now();
+
+      const endedSong = currentSong;
+      const endScore =
+        currentScoreData?.totalScore ??
+        (juryVotes.length > 0
+          ? Math.round(juryVotes.reduce((acc, v) => acc + v.score, 0) / juryVotes.length)
+          : 80);
+
+      // Set status pemutar menjadi ENDED & hentikan pemutaran video yang sudah selesai
+      isPlayerEndedRef.current = true;
+      setIsPlayerEnded(true);
+      isPlayingRef.current = false;
+      setIsPlaying(false);
+      setIsScoreModalOpen(false);
+
+      try {
+        playerRef.current?.pauseVideo?.();
+      } catch {}
+      try {
+        if (typeof document !== 'undefined') {
+          document.querySelectorAll('iframe').forEach((ifr) => {
+            try {
+              ifr.contentWindow?.postMessage(
+                JSON.stringify({ event: 'command', func: 'pauseVideo', args: [] }),
+                '*'
+              );
+            } catch {}
+          });
+        }
+      } catch {}
+
+      const hasNextInQueue = queue.length > 0;
+      const nextQueueItem = hasNextInQueue ? queue[0] : undefined;
+
+      if (hasNextInQueue) {
+        isAwaitingEndTransitionQueueSkipRef.current = true;
+
+        const proceedToNextSong = () => {
+          if (!isAwaitingEndTransitionQueueSkipRef.current) return;
+          isAwaitingEndTransitionQueueSkipRef.current = false;
+          if (endTransitionTimerRef.current) {
+            clearTimeout(endTransitionTimerRef.current);
+            endTransitionTimerRef.current = null;
+          }
+          clearSmartMcImmediately();
+          lastSkipTimestampRef.current = 0;
+          skipNextSong();
+        };
+
+        if (endTransitionTimerRef.current) {
+          clearTimeout(endTransitionTimerRef.current);
+        }
+        // Fallback batas waktu transisi (7.5 detik) jika speechSynthesis atau fallback audio selesai
+        endTransitionTimerRef.current = setTimeout(proceedToNextSong, 7500);
+
+        triggerSmartMcRef.current({
+          singerName: defaultSingerName,
+          songTitle: endedSong.title,
+          score: endScore,
+          triggeredBy: 'Transisi Lagu',
+          isManual: false,
+          nextSongTitle: nextQueueItem?.song.title,
+          broadcast: false,
+          onSpeechEnd: () => {
+            setTimeout(proceedToNextSong, 500);
+          },
+        });
+      } else {
+        // Antrean kosong: pindah ke standby & tampilkan Smart MC penutup lagu
+        isAwaitingEndTransitionQueueSkipRef.current = false;
+        lastSkipTimestampRef.current = 0;
+        skipNextSong();
+
+        triggerSmartMcRef.current({
+          singerName: defaultSingerName,
+          songTitle: endedSong.title,
+          score: endScore,
+          triggeredBy: 'Akhir Lagu',
+          isManual: false,
+          broadcast: false,
+        });
+      }
+    }
+  }, [currentSong, currentScoreData, juryVotes, defaultSingerName, queue, skipNextSong, clearSmartMcImmediately]);
+
+  const getSongDurationSeconds = useCallback((song: Song | null): number => {
+    if (!song) return 210;
+    if (song.duration) {
+      const parts = song.duration.split(':').map((p) => parseInt(p, 10));
+      if (parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
+        return parts[0] * 60 + parts[1];
+      }
+      if (parts.length === 3 && !isNaN(parts[0]) && !isNaN(parts[1]) && !isNaN(parts[2])) {
+        return parts[0] * 3600 + parts[1] * 60 + parts[2];
+      }
+    }
+    return 210;
+  }, []);
+
+  // Reset scoring evaluation locks & elapsed timer ONLY when currentSong.id changes
+  useEffect(() => {
+    hasTriggered60sScoreRef.current = null;
+    hasTriggeredScoreRef.current = null;
+    songPlaybackStartRef.current = Date.now();
+    latestRealTimeRef.current = 0;
+  }, [currentSong?.id]);
+
+  const notifyPlaybackTime = useCallback(
+    (currentTime: number, totalDuration?: number, isRealPlayerTime = false) => {
+      if (!currentSong || !isPlaying) return;
+      if (hasTriggeredScoreRef.current === `${currentSong.id}-ended`) return;
+
+      if (isRealPlayerTime && currentTime > 0) {
+        latestRealTimeRef.current = currentTime;
+      }
+
+      const duration = totalDuration && totalDuration > 15 ? totalDuration : getSongDurationSeconds(currentSong);
+      const remainingSeconds = duration - currentTime;
+
+      // =========================================================================
+      // Pemicu Waktu Skor & Quote (60 detik sebelum lagu berakhir):
+      // HANYA menampilkan kotak skor Dewan Juri & Quote (TANPA Smart MC dan TANPA suara)
+      // =========================================================================
+      if (
+        remainingSeconds <= 60 &&
+        remainingSeconds > 1.5 &&
+        currentTime >= 8 &&
+        hasTriggered60sScoreRef.current !== currentSong.id
+      ) {
+        hasTriggered60sScoreRef.current = currentSong.id;
+        const nextItem = queue.length > 0 ? queue[0] : undefined;
+        const autoScore = stopScoringAndGetResult() || generateScoreData(currentSong, defaultSingerName, nextItem);
+
+        // Dewan Juri Prajurit: Hitung rata-rata dari juri HP atau panel 5 juri default
+        const effectiveVotes =
+          juryVotes.length > 0
+            ? [...juryVotes]
+            : buildDefaultJuryVotes(autoScore.totalScore, currentSong.id, currentSong.title);
+        const sum = effectiveVotes.reduce((acc, v) => acc + v.score, 0);
+        const finalScore = Math.round(sum / effectiveVotes.length);
+        const quote = getScoreQuote(finalScore);
+
+        const scoreData: SongScoreData = {
+          ...autoScore,
+          totalScore: finalScore,
+          grade: finalScore >= 95 ? 'SS' : finalScore >= 88 ? 'S' : finalScore >= 80 ? 'A' : finalScore >= 65 ? 'B' : 'C',
+          rankTitle: quote,
+          commentary: quote,
+          juryVotes: effectiveVotes,
+          juryAverageScore: finalScore,
+          isJuryAverage: true,
+        };
+
+        setCurrentScoreData(scoreData);
+        setIsScoreModalOpen(true);
+      }
+
+      // Lagu berakhir penuh (kurang dari 1.2 detik sebelum durasi total habis) -> Picu ENDED & transisi lagu berikutnya
+      if (remainingSeconds <= 1.2 && currentTime > 15) {
+        handlePlayerEnded();
+      }
+    },
+    [currentSong, isPlaying, getSongDurationSeconds, queue, defaultSingerName, stopScoringAndGetResult, generateScoreData, handlePlayerEnded, juryVotes, buildDefaultJuryVotes]
+  );
+
+  // Sinkronisasi dinamis real-time: setiap kali juri baru masuk, perbarui data skor rata-rata & Quote
+  // Tanpa memunculkan modal skor sebelum waktunya (hanya update jika currentScoreData sudah aktif)
+  useEffect(() => {
+    if (juryVotes.length > 0 && currentSong) {
+      const sum = juryVotes.reduce((acc, v) => acc + v.score, 0);
+      const avg = Math.round(sum / juryVotes.length);
+      const quote = getScoreQuote(avg);
+      setCurrentScoreData((prev) => {
+        if (!prev) return null;
+        return {
+          ...prev,
+          totalScore: avg,
+          grade: avg >= 95 ? 'SS' : avg >= 88 ? 'S' : avg >= 80 ? 'A' : avg >= 65 ? 'B' : 'C',
+          rankTitle: quote,
+          commentary: quote,
+          juryVotes: [...juryVotes],
+          juryAverageScore: avg,
+          isJuryAverage: true,
+        };
+      });
+    }
+  }, [juryVotes, currentSong]);
+
+  // Global listener for YouTube postMessage API (infoDelivery & onStateChange events from IFrames)
+  useEffect(() => {
+    const handleWindowMessage = (event: MessageEvent) => {
+      try {
+        if (typeof event.data === 'string') {
+          const parsed = JSON.parse(event.data);
+          
+          // 1. YouTube postMessage player state ended:
+          // Format { event: 'onStateChange', info: 0 } or { event: 'infoDelivery', info: { playerState: 0 } }
+          if (
+            (parsed.event === 'onStateChange' && (parsed.info === 0 || parsed.data === 0)) ||
+            (parsed.event === 'infoDelivery' && parsed.info?.playerState === 0)
+          ) {
+            handlePlayerEnded();
+            return;
+          }
+
+          if (parsed.event === 'infoDelivery' && parsed.info) {
+            const curTime = parsed.info.currentTime;
+            const dur = parsed.info.duration;
+            if (typeof curTime === 'number' && typeof dur === 'number' && dur > 10) {
+              if (curTime >= dur - 1.2) {
+                handlePlayerEnded();
+                return;
+              }
+            }
+            if (typeof curTime === 'number' && curTime > 0) {
+              notifyPlaybackTime(curTime, dur, true);
+            }
+          }
+        }
+      } catch {}
+    };
+    window.addEventListener('message', handleWindowMessage);
+    return () => window.removeEventListener('message', handleWindowMessage);
+  }, [handlePlayerEnded, notifyPlaybackTime]);
+
+  const notifyPlaybackTimeRef = useRef(notifyPlaybackTime);
+  useEffect(() => {
+    notifyPlaybackTimeRef.current = notifyPlaybackTime;
+  }, [notifyPlaybackTime]);
+
+  const handlePlayerEndedRef = useRef(handlePlayerEnded);
+  useEffect(() => {
+    handlePlayerEndedRef.current = handlePlayerEnded;
+  }, [handlePlayerEnded]);
+
+  // Periodic active ticker: monitors playback position continuously every 1 second (stable across queue/jury updates)
+  useEffect(() => {
+    if (!isPlaying || !currentSong) return;
+    const songId = currentSong.id;
+    const dur = getSongDurationSeconds(currentSong);
+
+    const ticker = setInterval(() => {
+      if (hasTriggeredScoreRef.current === `${songId}-ended`) return;
+      if (playerRef.current && typeof playerRef.current.getCurrentTime === 'function') {
+        try {
+          const state = playerRef.current.getPlayerState?.();
+          if (state === 0) {
+            handlePlayerEndedRef.current();
+            return;
+          }
+          const cur = playerRef.current.getCurrentTime();
+          const pDur = playerRef.current.getDuration?.();
+          if (typeof cur === 'number' && cur > 0) {
+            notifyPlaybackTimeRef.current(cur, pDur || dur, true);
+            return;
+          }
+        } catch {}
+      }
+      // If YouTube iframe already reported real playback time via postMessage recently, let postMessage drive it
+      if (latestRealTimeRef.current > 0) {
+        return;
+      }
+      const elapsed = (Date.now() - songPlaybackStartRef.current) / 1000;
+      notifyPlaybackTimeRef.current(elapsed, dur, false);
+    }, 1000);
+
+    return () => clearInterval(ticker);
+  }, [isPlaying, currentSong?.id, getSongDurationSeconds]);
+
+  // Helper to broadcast messages to all connected PeerJS mobile clients
+  const broadcastToPeers = useCallback((msg: PeerMessage) => {
+    peerConnectionsRef.current.forEach((conn) => {
+      if (conn.open) {
+        try {
+          conn.send(msg);
+        } catch {}
+      }
+    });
+  }, []);
+
+  // Broadcast TV status update to all connected PeerJS mobile clients whenever song or queue changes
+  useEffect(() => {
+    const msg: PeerMessage = {
+      action: 'STATUS_UPDATE',
+      nowPlaying: currentSong?.title || '',
+      isPlaying,
+      currentTime: 0,
+      song: currentSong,
+      queue,
+      payload: { musicDelayMs },
+      clientCount: Math.max(1, peerConnectionsRef.current.size + 1),
+      timestamp: Date.now(),
+    };
+    broadcastToPeers(msg);
+  }, [currentSong, isPlaying, queue, musicDelayMs, broadcastToPeers]);
+
+  // PeerJS P2P Master Host: Enables serverless direct TV-HP connections (Vercel ready via 0.peerjs.com)
+  useEffect(() => {
+    let peerInstance: Peer | null = null;
+    let heartbeatCleanup: (() => void) | null = null;
+    let reconnectTimer: any = null;
+    let isCleanedUp = false;
+
+    const initMaster = () => {
+      if (isCleanedUp) return;
+
+      try {
+        const tvPeerId = getTvPeerId(roomId);
+        peerInstance = createPeer(tvPeerId);
+        peerRef.current = peerInstance;
+
+        // Keep WebSocket signaling alive on 0.peerjs.com
+        if (heartbeatCleanup) heartbeatCleanup();
+        heartbeatCleanup = startPeerHeartbeat(peerInstance);
+
+        peerInstance.on('open', (id) => {
+          if (isCleanedUp) return;
+          console.log('[PeerJS TV Master] Berhasil terdaftar dengan Peer ID:', id);
+        });
+
+        // Reconnect immediately if signaling server connection drops
+        peerInstance.on('disconnected', () => {
+          if (isCleanedUp) return;
+          console.log('[PeerJS TV Master] Sinyal terputus dari server. Menyambung ulang...');
+          if (reconnectTimer) clearTimeout(reconnectTimer);
+          reconnectTimer = setTimeout(() => {
+            if (!isCleanedUp && peerInstance && !peerInstance.destroyed && peerInstance.disconnected) {
+              try {
+                peerInstance.reconnect();
+              } catch {}
+            }
+          }, 1500);
+        });
+
+        // Handle incoming direct wireless microphone audio calls from mobile clients
+        peerInstance.on('call', (mediaConn) => {
+          if (isCleanedUp) return;
+          console.log('[PeerJS TV Master] Menerima panggilan audio mic dari:', mediaConn.peer);
+          // Answer call without sending local stream (Master only receives audio)
+          mediaConn.answer();
+          mediaConn.on('stream', (remoteStream) => {
+            console.log('[PeerJS TV Master] Audio stream remote diterima dari:', mediaConn.peer);
+            const callerName = mediaConn.metadata?.singerName || 'Prajurit (HP)';
+            attachAudioStream(mediaConn.peer, callerName, remoteStream);
+          });
+          mediaConn.on('close', () => {
+            cleanupSender(mediaConn.peer);
+          });
+          mediaConn.on('error', (err) => {
+            console.warn('[PeerJS TV Master] MediaConnection error:', err);
+          });
+        });
+
+        // Handle incoming data connections from mobile clients (Remote control & queue sync)
+        peerInstance.on('connection', (conn) => {
+          if (isCleanedUp) return;
+
+          conn.on('open', () => {
+            peerConnectionsRef.current.set(conn.peer, conn);
+            setRemoteConnectedDevices(Math.max(1, peerConnectionsRef.current.size + 1));
+
+            // Immediately send full state snapshot to the newly connected phone
+            conn.send({
+              action: 'STATUS_UPDATE',
+              nowPlaying: currentSong?.title || '',
+              isPlaying,
+              currentTime: 0,
+              song: currentSong,
+              queue,
+              clientCount: Math.max(1, peerConnectionsRef.current.size + 1),
+            });
+          });
+
+          conn.on('data', (data: any) => {
+            if (!data || !data.action) return;
+
+            switch (data.action) {
+              case 'PLAY':
+                setIsPlaying(true);
+                break;
+
+              case 'PAUSE':
+                setIsPlaying(false);
+                break;
+
+              case 'NEXT_SONG':
+                skipNextSong();
+                break;
+
+              case 'SELECT_SONG':
+                if (data.payload) {
+                  playSongNow(data.payload, data.senderName);
+                }
+                break;
+
+              case 'SET_VOLUME':
+              case 'SET_MUSIC_VOLUME': {
+                const vol = typeof data.payload === 'number' ? data.payload : data.payload?.volume;
+                const isMutedVal = typeof data.payload?.isMuted === 'boolean' ? data.payload.isMuted : false;
+                if (typeof vol === 'number') {
+                  const clamped = Math.max(0, Math.min(100, Math.round(vol)));
+                  setAudioVolume(clamped);
+                  setIsMuted(isMutedVal);
+                  applyHardwarePlayerVolume(clamped, isMutedVal);
+                  const sender = data.senderName || data.payload?.senderName;
+                  if (sender) {
+                    addRemoteNotification(
+                      isMutedVal ? `🔇 ${sender} membisukan musik TV` : `🔊 ${sender} mengatur volume musik: ${clamped}%`,
+                      sender,
+                      'info'
+                    );
+                  }
+                }
+                break;
+              }
+
+              case 'ADD_QUEUE':
+                if (data.payload?.song) {
+                  addToQueue(
+                    data.payload.song,
+                    data.payload.singerName,
+                    data.payload.priority,
+                    data.payload.queueId || data.payload.item?.queueId
+                  );
+                }
+                break;
+
+              case 'REMOVE_QUEUE':
+                if (data.payload?.queueId) {
+                  removeFromQueue(data.payload.queueId);
+                }
+                break;
+
+              case 'REORDER_QUEUE':
+                if (typeof data.payload?.fromIndex === 'number' && typeof data.payload?.toIndex === 'number') {
+                  moveQueueItem(data.payload.fromIndex, data.payload.toIndex);
+                }
+                break;
+
+              case 'PLAY_SOUND_FX':
+                if (data.payload?.sound) {
+                  triggerSoundFx(data.payload.sound, false, data.payload.senderName);
+                }
+                break;
+
+              case 'MIC_PARAMS':
+                if (data.payload) {
+                  const targetId = conn.peer;
+                  if (typeof data.payload.volume === 'number') {
+                    setClientMicVolume(targetId, data.payload.volume);
+                  }
+                  if (typeof data.payload.echo === 'number') {
+                    setClientMicEcho(targetId, data.payload.echo);
+                  }
+                }
+                break;
+
+              case 'UPDATE_MIC_LEVEL':
+              case 'RTC_MIC_LEVEL':
+                if (data.payload && typeof data.payload.level === 'number') {
+                  const targetLevel = data.payload.level;
+                  handleWebRTCSignaling({
+                    type: 'RTC_MIC_LEVEL',
+                    roomId,
+                    payload: {
+                      senderId: data.payload.senderId || conn.peer,
+                      senderName: data.payload.senderName,
+                      level: targetLevel,
+                    },
+                  });
+                }
+                break;
+
+              case 'SET_MUSIC_DELAY':
+                if (typeof data.payload?.delayMs === 'number') {
+                  setMusicDelayMs(data.payload.delayMs, true);
+                }
+                break;
+
+              case 'STATUS_UPDATE':
+                conn.send({
+                  action: 'STATUS_UPDATE',
+                  nowPlaying: currentSong?.title || '',
+                  isPlaying,
+                  currentTime: 0,
+                  song: currentSong,
+                  queue,
+                  payload: { musicDelayMs },
+                  clientCount: Math.max(1, peerConnectionsRef.current.size + 1),
+                });
+                break;
+
+              case 'SUBMIT_JURY_SCORE':
+                if (data.payload && typeof data.payload.score === 'number') {
+                  const jName = (data.payload.juryName || data.senderName || 'Prajurit (HP)').trim();
+                  const normName = jName.toLowerCase();
+                  const vote: JuryVote = {
+                    clientId: normName || data.senderId || conn.peer,
+                    juryName: jName,
+                    score: Math.max(0, Math.min(100, Math.round(data.payload.score))),
+                    songId: currentSong?.id || '',
+                    songTitle: currentSong?.title || '',
+                    submittedAt: Date.now(),
+                  };
+                  setJuryVotes((prev) => {
+                    const filtered = prev.filter(
+                      (v) => (v.juryName || '').trim().toLowerCase() !== normName && v.clientId !== vote.clientId
+                    );
+                    const nextVotes = [...filtered, vote];
+                    peerConnectionsRef.current.forEach((c) => {
+                      if (c.open) {
+                        try {
+                          c.send({
+                            action: 'SYNC_JURY_SCORES',
+                            payload: { votes: nextVotes, songId: currentSong?.id, lastVote: vote },
+                          });
+                        } catch {}
+                      }
+                    });
+                    return nextVotes;
+                  });
+                  addRemoteNotification(
+                    `⚖️ ${vote.juryName} memberi nilai: ${vote.score}!`,
+                    vote.juryName,
+                    'info'
+                  );
+                }
+                break;
+
+              case 'TRIGGER_SMART_MC':
+                if (Date.now() - lastMcTriggerTimeRef.current >= 1000) {
+                  const sender = data.senderName || data.payload?.singerName || 'Prajurit (HP)';
+                  triggerSmartMcRef.current({
+                    singerName: data.payload?.singerName || sender,
+                    songTitle: data.payload?.songTitle || currentSong?.title,
+                    score: data.payload?.score,
+                    forceTier: data.payload?.forceTier,
+                    triggeredBy: sender,
+                    announcement: data.payload?.announcement
+                      ? { ...data.payload.announcement, isManual: true }
+                      : undefined,
+                    isManual: true,
+                    broadcast: false,
+                  });
+                  addRemoteNotification(`🎙️ ${sender} memanggil Pantun Smart MC Diskomlekau!`, sender, 'success');
+                }
+                break;
+            }
+          });
+
+          conn.on('close', () => {
+            peerConnectionsRef.current.delete(conn.peer);
+            setRemoteConnectedDevices(Math.max(1, peerConnectionsRef.current.size + 1));
+          });
+
+          conn.on('error', () => {
+            peerConnectionsRef.current.delete(conn.peer);
+            setRemoteConnectedDevices(Math.max(1, peerConnectionsRef.current.size + 1));
+          });
+        });
+
+        // Handle incoming WebRTC MediaConnection for Wireless Microphone audio streaming
+        peerInstance.on('call', (mediaConn) => {
+          if (isCleanedUp) return;
+
+          // Answer call to accept incoming audio stream from phone
+          mediaConn.answer();
+          const senderId = mediaConn.peer;
+          const senderName = mediaConn.metadata?.singerName || 'Prajurit (HP)';
+
+          // Enforce zero jitter buffer latency hint on RTCRtpReceiver
+          try {
+            const pc = (mediaConn as any).peerConnection as RTCPeerConnection;
+            if (pc && pc.getReceivers) {
+              pc.getReceivers().forEach((receiver) => {
+                if ('playoutDelayHint' in receiver) (receiver as any).playoutDelayHint = 0;
+                if ('jitterBufferTarget' in receiver) (receiver as any).jitterBufferTarget = 0;
+              });
+            }
+          } catch {}
+
+          mediaConn.on('stream', (remoteStream) => {
+            try {
+              remoteStream.getAudioTracks().forEach((track) => {
+                if ('playoutDelayHint' in track) (track as any).playoutDelayHint = 0;
+              });
+            } catch {}
+            attachAudioStream(senderId, senderName, remoteStream);
+            addRemoteNotification(
+              `🎤 ${senderName} mengaktifkan Mikrofon HP (P2P)! Suara langsung disiarkan ke speaker TV.`,
+              senderName,
+              'success'
+            );
+          });
+
+          mediaConn.on('close', () => {
+            cleanupSender(senderId);
+            addRemoteNotification(
+              `🎤 ${senderName} mematikan Mikrofon HP.`,
+              senderName,
+              'info'
+            );
+          });
+
+          mediaConn.on('error', () => {
+            cleanupSender(senderId);
+          });
+        });
+
+        peerInstance.on('error', (err: any) => {
+          const errMsg = String(err?.message || err?.type || err || '');
+          if (isCleanedUp) return;
+
+          // Recover from server drops or transient disconnects
+          if (errMsg.includes('Lost connection') || err?.type === 'network' || err?.type === 'server-error') {
+            if (peerInstance && !peerInstance.destroyed && peerInstance.disconnected) {
+              try {
+                peerInstance.reconnect();
+              } catch {}
+            }
+          } else if (err?.type === 'unavailable-id') {
+            // Wait 2.5 seconds if previous session hasn't released ID, then re-initialize
+            if (reconnectTimer) clearTimeout(reconnectTimer);
+            reconnectTimer = setTimeout(() => {
+              if (!isCleanedUp) initMaster();
+            }, 2500);
+          }
+        });
+      } catch (e) {
+        console.warn('[PeerJS TV Master] initialization error:', e);
+      }
+    };
+
+    initMaster();
+
+    return () => {
+      isCleanedUp = true;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      if (heartbeatCleanup) heartbeatCleanup();
+      peerConnectionsRef.current.clear();
+      if (peerInstance) {
+        try {
+          peerInstance.destroy();
+        } catch {}
+      }
+      peerRef.current = null;
+    };
+  }, [
+    roomId,
+    currentSong,
+    isPlaying,
+    queue,
+    attachAudioStream,
+    cleanupSender,
+    addRemoteNotification,
+    addToQueue,
+    moveQueueItem,
+    playSongNow,
+    removeFromQueue,
+    setAudioVolume,
+    setClientMicEcho,
+    setClientMicVolume,
+    setIsPlaying,
+    skipNextSong,
+    triggerSoundFx,
+  ]);
+
+  const changeAudioVolume = useCallback(
+    (val: number | ((prev: number) => number)) => {
+      setAudioVolume((prev) => {
+        const next = typeof val === 'function' ? val(prev) : val;
+        const clamped = Math.max(0, Math.min(100, Math.round(next)));
+        applyHardwarePlayerVolume(clamped, false);
+        broadcastMessage('SET_MUSIC_VOLUME', { volume: clamped, isMuted: false, senderName: 'Layar Utama' });
+        fetch(`/api/room/${encodeURIComponent(roomId)}/volume`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ volume: clamped, isMuted: false, senderName: 'Layar Utama' }),
+        }).catch(() => {});
+        return clamped;
+      });
+    },
+    [applyHardwarePlayerVolume, broadcastMessage, roomId]
+  );
+
+  const toggleMusicMute = useCallback(() => {
+    setIsMuted((prev) => {
+      const next = !prev;
+      applyHardwarePlayerVolume(audioVolume, next);
+      broadcastMessage('SET_MUSIC_VOLUME', { volume: audioVolume, isMuted: next, senderName: 'Layar Utama' });
+      fetch(`/api/room/${encodeURIComponent(roomId)}/volume`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ volume: audioVolume, isMuted: next, senderName: 'Layar Utama' }),
+      }).catch(() => {});
+      return next;
+    });
+  }, [applyHardwarePlayerVolume, audioVolume, broadcastMessage, roomId]);
+
+  return (
+    <KaraokeContext.Provider
+      value={{
+        searchQuery,
+        setSearchQuery,
+        suffixFilter,
+        setSuffixFilter,
+        searchResults,
+        isSearching,
+        searchError,
+        isCuratedFallback,
+        activeCategory,
+        executeSearch,
+        addDirectVideoUrl,
+        queue,
+        currentSong,
+        history,
+        addToQueue,
+        removeFromQueue,
+        moveQueueItem,
+        clearQueue,
+        updateSingerName,
+        playSongNow,
+        skipNextSong,
+        replayCurrentSong,
+        evaluateCurrentSong,
+        notifyPlaybackTime,
+        isPlaying,
+        setIsPlaying,
+        togglePlayPause,
+        audioVolume,
+        setAudioVolume,
+        changeAudioVolume,
+        isMuted,
+        setIsMuted,
+        toggleMusicMute,
+        handlePlayerEnded,
+        playerRef,
+        isQueueOpenMobile,
+        setIsQueueOpenMobile,
+        isScoreModalOpen,
+        setIsScoreModalOpen,
+        currentScoreData,
+        isTvMode,
+        setIsTvMode,
+        defaultSingerName,
+        setDefaultSingerName,
+        juryVotes,
+        submitJuryVote,
+        getJuryAverageSummary,
+        activeMcAnnouncement,
+        isMcSpeaking,
+        isPlayerEnded,
+        triggerSmartMc,
+        replaySmartMcSpeech,
+        dismissSmartMc,
+        roomId,
+        remoteConnectedDevices,
+        remoteClientsList,
+        remoteNotifications,
+        removeRemoteNotification,
+        activeReactions,
+        triggerSoundFx,
+        activeWirelessMics,
+        masterMicVolume,
+        setMasterMicVolume,
+        masterMicEcho,
+        setMasterMicEcho,
+        isMasterMicMuted,
+        setIsMasterMicMuted,
+        increaseMicVolume,
+        decreaseMicVolume,
+        increaseMicEcho,
+        decreaseMicEcho,
+        isAudioSuspended,
+        resumeAudio,
+        setClientMicVolume,
+        setClientMicEcho,
+        toggleClientMicMute,
+        scoringState,
+        isScoringActive,
+        startScoring,
+        stopScoringAndGetResult,
+        musicMediaRef,
+        musicDelayMs,
+        setMusicDelayMs,
+        connectMusicMediaElement,
+      }}
+    >
+      {/* Hidden HTMLMediaElement for Web Audio API music scoring analyzer */}
+      <audio
+        ref={musicMediaRef}
+        id="karaoke-music-media-element"
+        crossOrigin="anonymous"
+        style={{ display: 'none' }}
+      />
+      {children}
+    </KaraokeContext.Provider>
+  );
+};
+
+export const useKaraoke = (): KaraokeContextType => {
+  const context = useContext(KaraokeContext);
+  if (!context) {
+    throw new Error('useKaraoke must be used within a KaraokeProvider');
+  }
+  return context;
+};
+

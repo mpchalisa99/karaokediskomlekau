@@ -1,0 +1,189 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 480" width="100%" height="100%">
+  <defs>
+    <!-- Background blue gradient -->
+    <linearGradient id="bgBlueSes" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#1565c0" />
+      <stop offset="100%" stop-color="#0d47a1" />
+    </linearGradient>
+
+    <!-- Uniform sky blue gradient -->
+    <linearGradient id="uniformBlueSes" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#dbeafe" />
+      <stop offset="50%" stop-color="#bfdbfe" />
+      <stop offset="100%" stop-color="#93c5fd" />
+    </linearGradient>
+
+    <!-- Epaulet dark navy gradient -->
+    <linearGradient id="epauletNavySes" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#0a192f" />
+      <stop offset="100%" stop-color="#172a45" />
+    </linearGradient>
+
+    <!-- Gold metallic gradient for rank flowers & wings -->
+    <linearGradient id="goldGradientSes" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fef08a" />
+      <stop offset="50%" stop-color="#eab308" />
+      <stop offset="100%" stop-color="#a16207" />
+    </linearGradient>
+
+    <!-- Skin tone gradient -->
+    <linearGradient id="skinToneSes" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f6d3b4" />
+      <stop offset="50%" stop-color="#dda57d" />
+      <stop offset="100%" stop-color="#bd8057" />
+    </linearGradient>
+
+    <!-- Hair gradient with salt-and-pepper cropped finish -->
+    <linearGradient id="hairSaltPepper" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#4b5563" />
+      <stop offset="50%" stop-color="#374151" />
+      <stop offset="100%" stop-color="#1f2937" />
+    </linearGradient>
+  </defs>
+
+  <!-- Solid Military Blue Studio Backdrop -->
+  <rect width="360" height="480" fill="url(#bgBlueSes)" />
+
+  <!-- Vignette / Soft Studio Lighting -->
+  <circle cx="180" cy="180" r="170" fill="#38bdf8" opacity="0.18" filter="blur(20px)" />
+
+  <!-- Body / Torso Uniform (PDH TNI AU) -->
+  <path d="M 50 480 L 70 330 L 120 300 L 150 310 L 180 320 L 210 310 L 240 300 L 290 330 L 310 480 Z" fill="url(#uniformBlueSes)" />
+
+  <!-- Left Arm Badge: "MABES TNI AU / DISKOMLEKAU" (Viewer Right) -->
+  <g transform="translate(285, 360)">
+    <path d="M 0 0 L 22 -6 L 22 26 L 11 34 L 0 26 Z" fill="#0369a1" stroke="#facc15" stroke-width="1.2" />
+    <text x="11" y="10" font-family="Arial, sans-serif" font-size="4.2" font-weight="900" fill="#fef08a" text-anchor="middle">MABES</text>
+    <text x="11" y="18" font-family="Arial, sans-serif" font-size="3.8" font-weight="900" fill="#ffffff" text-anchor="middle">DISKOMLEK</text>
+  </g>
+
+  <!-- Shirt Placket Center Seam & Buttons -->
+  <rect x="175" y="315" width="10" height="165" fill="#93c5fd" opacity="0.6" />
+  <circle cx="180" cy="340" r="3.5" fill="#f8fafc" stroke="#94a3b8" stroke-width="1" />
+  <circle cx="180" cy="390" r="3.5" fill="#f8fafc" stroke="#94a3b8" stroke-width="1" />
+  <circle cx="180" cy="440" r="3.5" fill="#f8fafc" stroke="#94a3b8" stroke-width="1" />
+
+  <!-- Pockets -->
+  <!-- Right Chest Pocket (Viewer Left) -->
+  <rect x="85" y="370" width="70" height="75" rx="3" fill="#bfdbfe" stroke="#60a5fa" stroke-width="1.5" />
+  <path d="M 85 370 L 120 380 L 155 370 Z" fill="#93c5fd" />
+  <circle cx="120" cy="384" r="2.5" fill="#f8fafc" />
+
+  <!-- Left Chest Pocket (Viewer Right) -->
+  <rect x="205" y="370" width="70" height="75" rx="3" fill="#bfdbfe" stroke="#60a5fa" stroke-width="1.5" />
+  <path d="M 205 370 L 240 380 L 275 370 Z" fill="#93c5fd" />
+  <circle cx="240" cy="384" r="2.5" fill="#f8fafc" />
+
+  <!-- Name Tag: "UNTUNG KH" (Right Chest / Viewer Left) -->
+  <g transform="translate(86, 345)">
+    <rect width="70" height="18" rx="2" fill="#09090b" stroke="#facc15" stroke-width="1" />
+    <text x="35" y="12.5" font-family="Arial, sans-serif" font-size="8" font-weight="900" fill="#fef08a" text-anchor="middle" letter-spacing="0.8">UNTUNG KH</text>
+  </g>
+
+  <!-- Brevet Wing & Ribbons (Left Chest / Viewer Right) -->
+  <!-- Golden Wings -->
+  <g transform="translate(216, 332)">
+    <path d="M 0 6 Q 24 -4 48 6 Q 36 2 24 10 Q 12 2 0 6 Z" fill="url(#goldGradientSes)" stroke="#854d0e" stroke-width="0.8" />
+    <circle cx="24" cy="5" r="4.5" fill="#fef08a" stroke="#ca8a04" stroke-width="0.8" />
+  </g>
+
+  <!-- Ribbon Bars (Tanda Jasa) -->
+  <g transform="translate(206, 348)">
+    <rect x="0" y="0" width="22" height="7" fill="#ef4444" stroke="#ffffff" stroke-width="0.5" />
+    <rect x="22" y="0" width="22" height="7" fill="#3b82f6" stroke="#ffffff" stroke-width="0.5" />
+    <rect x="44" y="0" width="22" height="7" fill="#eab308" stroke="#ffffff" stroke-width="0.5" />
+
+    <rect x="0" y="7" width="22" height="7" fill="#10b981" stroke="#ffffff" stroke-width="0.5" />
+    <rect x="22" y="7" width="22" height="7" fill="#6366f1" stroke="#ffffff" stroke-width="0.5" />
+    <rect x="44" y="7" width="22" height="7" fill="#f97316" stroke="#ffffff" stroke-width="0.5" />
+  </g>
+
+  <!-- Gold Pocket Medals / Brevet -->
+  <circle cx="120" cy="425" r="11" fill="url(#goldGradientSes)" stroke="#854d0e" stroke-width="1.2" />
+  <circle cx="240" cy="425" r="11" fill="url(#goldGradientSes)" stroke="#854d0e" stroke-width="1.2" />
+
+  <!-- Shoulder Epaulets (Pangkat Kolonel TNI AU - 3 Melati Emas) -->
+  <!-- Left Epaulet (Viewer Left) -->
+  <g transform="translate(56, 290) rotate(16)">
+    <polygon points="0,0 68,-14 62,18 -4,26" fill="url(#epauletNavySes)" stroke="#facc15" stroke-width="1.2" />
+    <!-- 3 Jasmine Flowers (Melati Kolonel) -->
+    <circle cx="22" cy="5" r="3.5" fill="url(#goldGradientSes)" stroke="#854d0e" stroke-width="0.5" />
+    <circle cx="34" cy="2.5" r="3.5" fill="url(#goldGradientSes)" stroke="#854d0e" stroke-width="0.5" />
+    <circle cx="46" cy="0" r="3.5" fill="url(#goldGradientSes)" stroke="#854d0e" stroke-width="0.5" />
+    <!-- "TNI" letters -->
+    <text x="6" y="16" font-family="Arial, sans-serif" font-size="7" font-weight="900" fill="#facc15">TNI</text>
+  </g>
+
+  <!-- Right Epaulet (Viewer Right) -->
+  <g transform="translate(236, 276) rotate(-16)">
+    <polygon points="0,-14 68,0 72,26 6,18" fill="url(#epauletNavySes)" stroke="#facc15" stroke-width="1.2" />
+    <!-- 3 Jasmine Flowers (Melati Kolonel) -->
+    <circle cx="22" cy="0" r="3.5" fill="url(#goldGradientSes)" stroke="#854d0e" stroke-width="0.5" />
+    <circle cx="34" cy="2.5" r="3.5" fill="url(#goldGradientSes)" stroke="#854d0e" stroke-width="0.5" />
+    <circle cx="46" cy="5" r="3.5" fill="url(#goldGradientSes)" stroke="#854d0e" stroke-width="0.5" />
+    <!-- "TNI" letters -->
+    <text x="50" y="16" font-family="Arial, sans-serif" font-size="7" font-weight="900" fill="#facc15">TNI</text>
+  </g>
+
+  <!-- Shirt Collar -->
+  <path d="M 125 295 L 155 315 L 180 325 L 205 315 L 235 295 L 205 275 L 180 282 L 155 275 Z" fill="#eff6ff" stroke="#93c5fd" stroke-width="1.5" />
+  <!-- Collar Left & Right Points -->
+  <polygon points="135,290 155,315 178,285" fill="#f8fafc" stroke="#bfdbfe" stroke-width="1" />
+  <polygon points="225,290 205,315 182,285" fill="#f8fafc" stroke="#bfdbfe" stroke-width="1" />
+
+  <!-- Neck -->
+  <path d="M 155 250 L 155 290 Q 180 305 205 290 L 205 250 Z" fill="url(#skinToneSes)" />
+  <path d="M 155 280 Q 180 295 205 280 L 205 290 Q 180 305 155 290 Z" fill="#b45309" opacity="0.18" />
+
+  <!-- Head / Face -->
+  <!-- Ears -->
+  <ellipse cx="123" cy="182" rx="14" ry="25" fill="url(#skinToneSes)" />
+  <ellipse cx="237" cy="182" rx="14" ry="25" fill="url(#skinToneSes)" />
+  <ellipse cx="124" cy="182" rx="8" ry="15" fill="#bd8057" opacity="0.3" />
+  <ellipse cx="236" cy="182" rx="8" ry="15" fill="#bd8057" opacity="0.3" />
+
+  <!-- Jaw and Chin -->
+  <path d="M 132 155 Q 128 220 150 252 Q 180 270 210 252 Q 232 220 228 155 Z" fill="url(#skinToneSes)" />
+
+  <!-- Hair Base (Salt & Pepper Cropped) -->
+  <path d="M 125 155 Q 125 82 180 78 Q 235 82 235 155 Q 215 115 180 115 Q 145 115 125 155 Z" fill="url(#hairSaltPepper)" />
+  <path d="M 128 145 Q 140 102 185 98 Q 225 102 232 145 Q 225 122 180 120 Q 138 122 128 145 Z" fill="#374151" />
+
+  <!-- Eyebrows -->
+  <path d="M 142 160 Q 160 156 170 162" stroke="#1f2937" stroke-width="4.5" stroke-linecap="round" fill="none" />
+  <path d="M 190 162 Q 200 156 218 160" stroke="#1f2937" stroke-width="4.5" stroke-linecap="round" fill="none" />
+
+  <!-- Eyes -->
+  <!-- Left Eye -->
+  <ellipse cx="157" cy="174" rx="9" ry="5.5" fill="#ffffff" />
+  <circle cx="157" cy="174" r="4.2" fill="#2d1d16" />
+  <circle cx="157" cy="174" r="2.2" fill="#000000" />
+  <circle cx="155.5" cy="172.5" r="1.2" fill="#ffffff" />
+  <path d="M 148 171 Q 157 167 166 171" stroke="#1f2937" stroke-width="1.8" fill="none" />
+
+  <!-- Right Eye -->
+  <ellipse cx="203" cy="174" rx="9" ry="5.5" fill="#ffffff" />
+  <circle cx="203" cy="174" r="4.2" fill="#2d1d16" />
+  <circle cx="203" cy="174" r="2.2" fill="#000000" />
+  <circle cx="201.5" cy="172.5" r="1.2" fill="#ffffff" />
+  <path d="M 194 171 Q 203 167 212 171" stroke="#1f2937" stroke-width="1.8" fill="none" />
+
+  <!-- Nose -->
+  <path d="M 180 166 L 177 198 Q 170 206 178 210 Q 180 211 182 210 Q 190 206 183 198 Z" fill="#bd8057" opacity="0.4" />
+  <path d="M 174 206 Q 180 211 186 206" stroke="#78350f" stroke-width="1.5" stroke-linecap="round" fill="none" />
+
+  <!-- Lips / Mouth -->
+  <path d="M 166 228 Q 180 232 194 228" stroke="#9a3412" stroke-width="2.5" stroke-linecap="round" fill="none" />
+  <path d="M 170 232 Q 180 238 190 232" stroke="#c2410c" stroke-width="1.5" stroke-linecap="round" fill="none" />
+
+  <!-- Gold Decorative Border Frame -->
+  <rect x="6" y="6" width="348" height="468" rx="8" fill="none" stroke="url(#goldGradientSes)" stroke-width="4" />
+  <rect x="12" y="12" width="336" height="456" rx="6" fill="none" stroke="#38bdf8" stroke-width="1" opacity="0.8" />
+
+  <!-- Bottom Title Banner -->
+  <g transform="translate(20, 432)">
+    <rect width="320" height="36" rx="6" fill="#030d22" stroke="url(#goldGradientSes)" stroke-width="1.5" opacity="0.95" />
+    <text x="160" y="16" font-family="Arial, sans-serif" font-size="11" font-weight="900" fill="#fef08a" text-anchor="middle" letter-spacing="1">SESDISKOMLEKAU</text>
+    <text x="160" y="29" font-family="Arial, sans-serif" font-size="9" font-weight="700" fill="#bae6fd" text-anchor="middle" letter-spacing="0.5">Kolonel Lek Untung K.H.</text>
+  </g>
+</svg>

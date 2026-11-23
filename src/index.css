@@ -1,0 +1,650 @@
+@import "tailwindcss";
+
+/* Force Dark Mode across all devices, mobile browsers, and Smart TVs */
+:root {
+  color-scheme: dark !important;
+  --color-scheme: dark !important;
+  background-color: #060e20 !important;
+  background: #060e20 !important;
+  color: #f8fafc !important;
+}
+
+html {
+  color-scheme: dark !important;
+  background-color: #060e20 !important;
+  background: #060e20 !important;
+  color: #f8fafc !important;
+  width: 100%;
+  height: 100%;
+}
+
+body {
+  color-scheme: dark !important;
+  background-color: #060e20 !important;
+  background: #060e20 !important;
+  color: #f8fafc !important;
+  min-height: 100vh;
+  margin: 0;
+  padding: 0;
+  font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background-image: 
+    radial-gradient(ellipse 80% 50% at 50% -20%, rgba(14, 165, 233, 0.15), transparent),
+    linear-gradient(to bottom, rgba(6, 14, 32, 0.95), rgba(4, 9, 20, 0.98)),
+    radial-gradient(#0284c7 0.75px, transparent 0.75px);
+  background-size: 100% 100%, 100% 100%, 28px 28px;
+  background-attachment: fixed;
+}
+
+#root {
+  min-height: 100vh;
+  background-color: #060e20 !important;
+  color: #f8fafc !important;
+}
+
+h1, h2, h3, .font-display {
+  font-family: 'Outfit', 'Plus Jakarta Sans', system-ui, sans-serif;
+}
+
+/* Custom Tactical Scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: rgba(7, 18, 44, 0.7);
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(56, 189, 248, 0.35);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(56, 189, 248, 0.75);
+}
+
+@keyframes pulseRadar {
+  0%, 100% {
+    box-shadow: 0 0 15px rgba(56, 189, 248, 0.35), 0 0 30px rgba(2, 132, 199, 0.2);
+  }
+  50% {
+    box-shadow: 0 0 25px rgba(56, 189, 248, 0.65), 0 0 45px rgba(14, 165, 233, 0.4);
+  }
+}
+
+.glow-tni {
+  animation: pulseRadar 3s infinite ease-in-out;
+}
+
+/* Tactical HUD corner accents */
+.hud-corner {
+  position: relative;
+}
+.hud-corner::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 8px;
+  height: 8px;
+  border-top: 2px solid #38bdf8;
+  border-left: 2px solid #38bdf8;
+  pointer-events: none;
+}
+.hud-corner::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  width: 8px;
+  height: 8px;
+  border-bottom: 2px solid #38bdf8;
+  border-right: 2px solid #38bdf8;
+  pointer-events: none;
+}
+
+/* TV Fullscreen cursor hide & Smart TV Tizen scrollbar suppression */
+html.tv-mode-active,
+body.tv-mode-active {
+  overflow: hidden !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  cursor: none !important;
+  user-select: none !important;
+  -webkit-user-select: none !important;
+}
+
+html.tv-mode-active *,
+body.tv-mode-active * {
+  cursor: none !important;
+}
+
+.tv-fullscreen-mode {
+  overflow: hidden !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  cursor: none !important;
+}
+
+.tv-fullscreen-mode * {
+  cursor: none !important;
+}
+
+/* Smooth continuous marquee ticker for TV */
+@keyframes marqueeSmooth {
+  0% {
+    transform: translate3d(0, 0, 0);
+  }
+  100% {
+    transform: translate3d(-50%, 0, 0);
+  }
+}
+
+.animate-marquee-tv {
+  display: inline-flex;
+  white-space: nowrap;
+  animation: marqueeSmooth 35s linear infinite;
+  will-change: transform;
+}
+
+.animate-marquee-tv:hover {
+  animation-play-state: paused;
+}
+
+/* White text with crisp red outline (list merah) for TV Master Title */
+.title-white-red-stroke {
+  color: #ffffff !important; /* Pure White */
+  -webkit-text-stroke: 1.5px #dc2626;
+  text-stroke: 1.5px #dc2626;
+  paint-order: stroke fill;
+  text-shadow: 
+    0 0 12px rgba(239, 68, 68, 0.95),
+    0 0 24px rgba(220, 38, 38, 0.75),
+    0 2px 4px rgba(0, 0, 0, 0.95);
+}
+
+@media (min-width: 640px) {
+  .title-white-red-stroke {
+    -webkit-text-stroke: 2px #dc2626;
+    text-stroke: 2px #dc2626;
+  }
+}
+
+@media (min-width: 768px) {
+  .title-white-red-stroke {
+    -webkit-text-stroke: 2.2px #dc2626;
+    text-stroke: 2.2px #dc2626;
+  }
+}
+
+@media (min-width: 1024px) {
+  .title-white-red-stroke {
+    -webkit-text-stroke: 2.8px #dc2626;
+    text-stroke: 2.8px #dc2626;
+  }
+}
+
+@media (min-width: 1280px) {
+  .title-white-red-stroke {
+    -webkit-text-stroke: 3.2px #b91c1c;
+    text-stroke: 3.2px #b91c1c;
+  }
+}
+
+/* Light blue text with deep dark blue outline (warna dasar biru muda list huruf biru tua) */
+.title-lightblue-darkblue-stroke {
+  color: #7dd3fc !important; /* Biru Muda Terang */
+  -webkit-text-stroke: 1.5px #021a44;
+  text-stroke: 1.5px #021a44;
+  paint-order: stroke fill;
+  text-shadow: 
+    0 0 14px rgba(56, 189, 248, 0.95),
+    0 0 24px rgba(3, 105, 161, 0.8),
+    0 2px 4px rgba(0, 0, 0, 0.95);
+}
+
+@media (min-width: 640px) {
+  .title-lightblue-darkblue-stroke {
+    -webkit-text-stroke: 2px #021a44;
+    text-stroke: 2px #021a44;
+  }
+}
+
+@media (min-width: 768px) {
+  .title-lightblue-darkblue-stroke {
+    -webkit-text-stroke: 2.2px #021a44;
+    text-stroke: 2.2px #021a44;
+  }
+}
+
+@media (min-width: 1024px) {
+  .title-lightblue-darkblue-stroke {
+    -webkit-text-stroke: 2.8px #02163b;
+    text-stroke: 2.8px #02163b;
+  }
+}
+
+@media (min-width: 1280px) {
+  .title-lightblue-darkblue-stroke {
+    -webkit-text-stroke: 3.2px #011233;
+    text-stroke: 3.2px #011233;
+  }
+}
+
+/* =========================================================================
+   ANIMASI KARAKTER SORAK SORAI TRANSPARAN (KARAOKE OVERLAY)
+   - Transparan, tidak menutupi lirik lagu
+   - Ringan, smooth 60fps dengan GPU transforms
+   ========================================================================= */
+
+/* Animasi Tulisan Sorak Besar Sangat Transparan (Latar Belakang Tetap Terlihat) */
+@keyframes cheerTextFloat {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.82);
+  }
+  15% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1.04);
+  }
+  28% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+  75% {
+    opacity: 0.92;
+    transform: translate(-50%, -50%) scale(1) translateY(0);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(1.08) translateY(-24px);
+  }
+}
+
+.animate-cheer-text-pop {
+  animation: cheerTextFloat 2.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes cheerFloat {
+  0%, 100% {
+    transform: translateY(0px) rotate(0deg);
+  }
+  50% {
+    transform: translateY(-8px) rotate(1.5deg);
+  }
+}
+
+@keyframes cheerClap {
+  0%, 100% {
+    transform: scale(1) rotate(0deg);
+  }
+  25% {
+    transform: scale(0.92) rotate(-6deg);
+  }
+  50% {
+    transform: scale(1.08) rotate(4deg);
+  }
+  75% {
+    transform: scale(0.95) rotate(-2deg);
+  }
+}
+
+@keyframes cheerSalute {
+  0% {
+    transform: translateY(12px) scale(0.9);
+    opacity: 0;
+  }
+  20% {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+  }
+  40% {
+    transform: translateY(-3px) scale(1.02);
+  }
+  70% {
+    transform: translateY(0) scale(1);
+  }
+  100% {
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes cheerSawer {
+  0%, 100% {
+    transform: rotate(-3deg) translateY(0);
+  }
+  50% {
+    transform: rotate(3deg) translateY(-6px);
+  }
+}
+
+@keyframes cheerMoneyFloat {
+  0% {
+    transform: translate(0, 0) rotate(0deg) scale(0.7);
+    opacity: 0;
+  }
+  20% {
+    opacity: 0.8;
+  }
+  80% {
+    opacity: 0.8;
+  }
+  100% {
+    transform: translate(var(--tx, 20px), -60px) rotate(var(--rot, 25deg)) scale(1.05);
+    opacity: 0;
+  }
+}
+
+@keyframes cheerWobble {
+  0%, 100% {
+    transform: translateX(0) rotate(0deg);
+  }
+  20% {
+    transform: translateX(-4px) rotate(-4deg);
+  }
+  40% {
+    transform: translateX(4px) rotate(3deg);
+  }
+  60% {
+    transform: translateX(-3px) rotate(-2deg);
+  }
+  80% {
+    transform: translateX(2px) rotate(2deg);
+  }
+}
+
+@keyframes cheerLaugh {
+  0%, 100% {
+    transform: translateY(0) scale(1);
+  }
+  25% {
+    transform: translateY(-7px) scale(1.05) rotate(-2deg);
+  }
+  50% {
+    transform: translateY(2px) scale(0.98) rotate(2deg);
+  }
+  75% {
+    transform: translateY(-5px) scale(1.03) rotate(-1deg);
+  }
+}
+
+@keyframes cheerSonicRing {
+  0% {
+    transform: scale(0.4);
+    opacity: 0.85;
+  }
+  100% {
+    transform: scale(2.2);
+    opacity: 0;
+  }
+}
+
+@keyframes cheerBellSwing {
+  0%, 100% {
+    transform: rotate(0deg);
+    transform-origin: 50% 0%;
+  }
+  25% {
+    transform: rotate(-18deg);
+    transform-origin: 50% 0%;
+  }
+  75% {
+    transform: rotate(18deg);
+    transform-origin: 50% 0%;
+  }
+}
+
+@keyframes cheerDrumHit {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  20% {
+    transform: translateY(-6px);
+  }
+  40% {
+    transform: translateY(1px);
+  }
+  60% {
+    transform: translateY(-4px);
+  }
+  80% {
+    transform: translateY(0);
+  }
+}
+
+@keyframes cheerEggSplat {
+  0% {
+    transform: scale(0.2) rotate(-20deg);
+    opacity: 0;
+  }
+  40% {
+    transform: scale(1.1) rotate(5deg);
+    opacity: 0.8;
+  }
+  60% {
+    transform: scale(0.95) rotate(-2deg);
+    opacity: 0.85;
+  }
+  100% {
+    transform: scale(1) rotate(0deg);
+    opacity: 0.8;
+  }
+}
+
+.animate-cheer-float {
+  animation: cheerFloat 2.8s ease-in-out infinite;
+}
+
+.animate-cheer-clap {
+  animation: cheerClap 0.75s ease-in-out infinite;
+}
+
+.animate-cheer-salute {
+  animation: cheerSalute 1.8s ease-out infinite;
+}
+
+.animate-cheer-sawer {
+  animation: cheerSawer 1.2s ease-in-out infinite;
+}
+
+.animate-cheer-wobble {
+  animation: cheerWobble 0.8s ease-in-out infinite;
+}
+
+.animate-cheer-laugh {
+  animation: cheerLaugh 0.7s ease-in-out infinite;
+}
+
+.animate-cheer-bell {
+  animation: cheerBellSwing 1s ease-in-out infinite;
+}
+
+.animate-cheer-drum {
+  animation: cheerDrumHit 0.6s ease-in-out infinite;
+}
+
+/* Samsung Smart TV Tizen & Big Screen Fullscreen Optimization */
+html.tv-mode-active,
+body.tv-mode-active {
+  overflow: hidden !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  user-select: none !important;
+  -webkit-user-select: none !important;
+  cursor: default !important;
+  background-color: #000000 !important;
+}
+
+.tv-fullscreen-mode {
+  width: 100vw !important;
+  height: 100vh !important;
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  z-index: 999999 !important;
+  overflow: hidden !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+/* =========================================================================
+   SAMSUNG SMART TV (TIZEN) BULLETPROOF VANILLA CSS
+   Standard CSS without @layer to guarantee 100% full screen layout
+   even on older Chromium engines (Tizen 3.0, 4.0, 5.0, 5.5, 6.0)
+   ========================================================================= */
+.tv-stage-root {
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  background-color: #000000 !important;
+  color: #ffffff !important;
+  z-index: 999999 !important;
+  overflow: hidden !important;
+  box-sizing: border-box !important;
+  user-select: none !important;
+  -webkit-user-select: none !important;
+}
+
+.tv-stage-header {
+  width: 100% !important;
+  height: 92px !important;
+  min-height: 92px !important;
+  max-height: 92px !important;
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  background: linear-gradient(to bottom, #020713, #061531, #030919) !important;
+  border-bottom: 2px solid rgba(56, 189, 248, 0.6) !important;
+  padding: 0 12px !important;
+  box-sizing: border-box !important;
+  flex-shrink: 0 !important;
+  z-index: 30 !important;
+}
+
+.tv-stage-body {
+  flex: 1 1 0% !important;
+  width: 100% !important;
+  height: calc(100vh - 136px) !important;
+  min-height: 0 !important;
+  display: flex !important;
+  flex-direction: row !important;
+  overflow: hidden !important;
+  background-color: #000000 !important;
+  box-sizing: border-box !important;
+}
+
+.tv-stage-video-main {
+  flex: 1 1 0% !important;
+  height: 100% !important;
+  position: relative !important;
+  background-color: #000000 !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  overflow: hidden !important;
+  min-width: 0 !important;
+  box-sizing: border-box !important;
+}
+
+.tv-stage-iframe {
+  width: 100% !important;
+  height: 100% !important;
+  border: 0 !important;
+  display: block !important;
+  background-color: #000000 !important;
+}
+
+.tv-stage-sidebar {
+  width: 260px !important;
+  min-width: 250px !important;
+  max-width: 270px !important;
+  height: 100% !important;
+  display: flex !important;
+  flex-direction: column !important;
+  background: linear-gradient(to bottom, #061229, #040c1d, #020713) !important;
+  border-left: 1px solid rgba(56, 189, 248, 0.3) !important;
+  flex-shrink: 0 !important;
+  box-sizing: border-box !important;
+  z-index: 20 !important;
+  overflow: hidden !important;
+}
+
+.tv-stage-footer {
+  width: 100% !important;
+  height: 44px !important;
+  min-height: 44px !important;
+  max-height: 44px !important;
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  background-color: #000000 !important;
+  border-top: 1px solid rgba(56, 189, 248, 0.35) !important;
+  padding: 0 16px !important;
+  box-sizing: border-box !important;
+  flex-shrink: 0 !important;
+  z-index: 20 !important;
+}
+
+.title-white-red-stroke {
+  color: #ffffff !important;
+  text-shadow: 
+    -1px -1px 0 #dc2626,  
+     1px -1px 0 #dc2626,
+    -1px  1px 0 #dc2626,
+     1px  1px 0 #dc2626,
+     0 0 16px rgba(220, 38, 38, 0.8) !important;
+}
+
+/* Glassmorphism Skor Otomatis Dewan Juri Subdis Rudal - Ultra Transparan & Tidak Mengganggu Lagu */
+.glass-score-panel {
+  background: rgba(6, 18, 41, 0.94) !important;
+  border: 1px solid rgba(251, 191, 36, 0.4) !important;
+  box-shadow: none !important;
+}
+
+.score-giant-number {
+  font-family: var(--font-display, system-ui, -apple-system, sans-serif);
+  background: linear-gradient(180deg, #ffffff 0%, #fef08a 35%, #fbbf24 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+/* =========================================================================
+   SAMSUNG TIZEN™ OS SMART TV (MODEL UA65CU7000KXXD) OPTIMIZATION & FALLBACKS
+   - Unlayered CSS utilities for Tizen Chromium engines without @layer support
+   - Disables expensive GPU backdrop-filter blurs to guarantee 60fps video playback
+   ========================================================================= */
+.sr-only {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  white-space: nowrap !important;
+  border-width: 0 !important;
+}
+
+html.tv-mode-active *,
+body.tv-mode-active * {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+
+

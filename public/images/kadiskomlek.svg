@@ -1,0 +1,179 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 480" width="100%" height="100%">
+  <defs>
+    <!-- Background blue gradient -->
+    <linearGradient id="bgBlue" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#0288d1" />
+      <stop offset="100%" stop-color="#01579b" />
+    </linearGradient>
+
+    <!-- Uniform sky blue gradient -->
+    <linearGradient id="uniformBlue" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#dbeafe" />
+      <stop offset="50%" stop-color="#bfdbfe" />
+      <stop offset="100%" stop-color="#93c5fd" />
+    </linearGradient>
+
+    <!-- Epaulet dark navy gradient -->
+    <linearGradient id="epauletNavy" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#0a192f" />
+      <stop offset="100%" stop-color="#172a45" />
+    </linearGradient>
+
+    <!-- Gold metallic gradient for star & wings -->
+    <linearGradient id="goldGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fef08a" />
+      <stop offset="50%" stop-color="#eab308" />
+      <stop offset="100%" stop-color="#a16207" />
+    </linearGradient>
+
+    <!-- Skin tone gradient -->
+    <linearGradient id="skinTone" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f8d5b8" />
+      <stop offset="50%" stop-color="#e2ab86" />
+      <stop offset="100%" stop-color="#c98a63" />
+    </linearGradient>
+
+    <!-- Hair gradient -->
+    <linearGradient id="hairDark" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#2c2727" />
+      <stop offset="100%" stop-color="#171515" />
+    </linearGradient>
+  </defs>
+
+  <!-- Solid Military Blue Studio Backdrop -->
+  <rect width="360" height="480" fill="url(#bgBlue)" />
+
+  <!-- Vignette / Soft Lighting -->
+  <circle cx="180" cy="180" r="170" fill="#38bdf8" opacity="0.18" filter="blur(20px)" />
+
+  <!-- Body / Torso Uniform (PDH TNI AU) -->
+  <path d="M 50 480 L 70 330 L 120 300 L 150 310 L 180 320 L 210 310 L 240 300 L 290 330 L 310 480 Z" fill="url(#uniformBlue)" />
+
+  <!-- Shirt Placket Center Seam & Buttons -->
+  <rect x="175" y="315" width="10" height="165" fill="#93c5fd" opacity="0.6" />
+  <circle cx="180" cy="340" r="3.5" fill="#f8fafc" stroke="#94a3b8" stroke-width="1" />
+  <circle cx="180" cy="390" r="3.5" fill="#f8fafc" stroke="#94a3b8" stroke-width="1" />
+  <circle cx="180" cy="440" r="3.5" fill="#f8fafc" stroke="#94a3b8" stroke-width="1" />
+
+  <!-- Pockets -->
+  <!-- Right Chest Pocket (Viewer Left) -->
+  <rect x="85" y="370" width="70" height="75" rx="3" fill="#bfdbfe" stroke="#60a5fa" stroke-width="1.5" />
+  <path d="M 85 370 L 120 380 L 155 370 Z" fill="#93c5fd" />
+  <circle cx="120" cy="384" r="2.5" fill="#f8fafc" />
+
+  <!-- Left Chest Pocket (Viewer Right) -->
+  <rect x="205" y="370" width="70" height="75" rx="3" fill="#bfdbfe" stroke="#60a5fa" stroke-width="1.5" />
+  <path d="M 205 370 L 240 380 L 275 370 Z" fill="#93c5fd" />
+  <circle cx="240" cy="384" r="2.5" fill="#f8fafc" />
+
+  <!-- Name Tag: "I. GST KOMANG ALIT" (Right Chest / Viewer Left) -->
+  <g transform="translate(82, 345)">
+    <rect width="78" height="18" rx="2" fill="#09090b" stroke="#facc15" stroke-width="1" />
+    <text x="39" y="12.5" font-family="Arial, sans-serif" font-size="7.2" font-weight="900" fill="#fef08a" text-anchor="middle" letter-spacing="0.4">I. GST KOMANG ALIT</text>
+  </g>
+
+  <!-- Brevet Wing & Ribbons (Left Chest / Viewer Right) -->
+  <!-- Pilot / Comm Wings -->
+  <g transform="translate(216, 336)">
+    <!-- Wings shape -->
+    <path d="M 0 6 Q 24 -4 48 6 Q 36 2 24 10 Q 12 2 0 6 Z" fill="url(#goldGradient)" stroke="#854d0e" stroke-width="0.8" />
+    <circle cx="24" cy="5" r="4.5" fill="#fef08a" stroke="#ca8a04" stroke-width="0.8" />
+  </g>
+
+  <!-- Ribbon Bars (Tanda Jasa) -->
+  <g transform="translate(206, 350)">
+    <rect x="0" y="0" width="22" height="7" fill="#ef4444" stroke="#ffffff" stroke-width="0.5" />
+    <rect x="22" y="0" width="22" height="7" fill="#3b82f6" stroke="#ffffff" stroke-width="0.5" />
+    <rect x="44" y="0" width="22" height="7" fill="#eab308" stroke="#ffffff" stroke-width="0.5" />
+
+    <rect x="0" y="7" width="22" height="7" fill="#10b981" stroke="#ffffff" stroke-width="0.5" />
+    <rect x="22" y="7" width="22" height="7" fill="#6366f1" stroke="#ffffff" stroke-width="0.5" />
+    <rect x="44" y="7" width="22" height="7" fill="#f97316" stroke="#ffffff" stroke-width="0.5" />
+  </g>
+
+  <!-- Gold Pocket Medals / Brevet -->
+  <circle cx="120" cy="425" r="11" fill="url(#goldGradient)" stroke="#854d0e" stroke-width="1.2" />
+  <circle cx="240" cy="425" r="11" fill="url(#goldGradient)" stroke="#854d0e" stroke-width="1.2" />
+
+  <!-- Shoulder Epaulets (Pangkat Marsma TNI AU - 1 Bintang Emas) -->
+  <!-- Left Epaulet (Viewer Left) -->
+  <g transform="translate(56, 290) rotate(16)">
+    <polygon points="0,0 68,-14 62,18 -4,26" fill="url(#epauletNavy)" stroke="#facc15" stroke-width="1.2" />
+    <!-- Gold Star (Marsma TNI) -->
+    <polygon points="36,-2 40,7 49,7 42,12 45,21 36,16 28,21 31,12 24,7 33,7" fill="url(#goldGradient)" stroke="#a16207" stroke-width="0.6" transform="scale(0.8) translate(8, 0)" />
+    <!-- "TNI" letters -->
+    <text x="8" y="16" font-family="Arial, sans-serif" font-size="7" font-weight="900" fill="#facc15">TNI</text>
+  </g>
+
+  <!-- Right Epaulet (Viewer Right) -->
+  <g transform="translate(236, 276) rotate(-16)">
+    <polygon points="0,-14 68,0 72,26 6,18" fill="url(#epauletNavy)" stroke="#facc15" stroke-width="1.2" />
+    <!-- Gold Star (Marsma TNI) -->
+    <polygon points="36,-2 40,7 49,7 42,12 45,21 36,16 28,21 31,12 24,7 33,7" fill="url(#goldGradient)" stroke="#a16207" stroke-width="0.6" transform="scale(0.8) translate(18, 0)" />
+    <!-- "TNI" letters -->
+    <text x="50" y="16" font-family="Arial, sans-serif" font-size="7" font-weight="900" fill="#facc15">TNI</text>
+  </g>
+
+  <!-- Shirt Collar -->
+  <path d="M 125 295 L 155 315 L 180 325 L 205 315 L 235 295 L 205 275 L 180 282 L 155 275 Z" fill="#eff6ff" stroke="#93c5fd" stroke-width="1.5" />
+  <!-- Collar Left & Right Points -->
+  <polygon points="135,290 155,315 178,285" fill="#f8fafc" stroke="#bfdbfe" stroke-width="1" />
+  <polygon points="225,290 205,315 182,285" fill="#f8fafc" stroke="#bfdbfe" stroke-width="1" />
+
+  <!-- Neck -->
+  <path d="M 155 250 L 155 290 Q 180 305 205 290 L 205 250 Z" fill="url(#skinTone)" />
+  <path d="M 155 280 Q 180 295 205 280 L 205 290 Q 180 305 155 290 Z" fill="#b45309" opacity="0.18" />
+
+  <!-- Head / Face -->
+  <!-- Ears -->
+  <ellipse cx="125" cy="185" rx="14" ry="24" fill="url(#skinTone)" />
+  <ellipse cx="235" cy="185" rx="14" ry="24" fill="url(#skinTone)" />
+  <ellipse cx="126" cy="185" rx="8" ry="15" fill="#c27d50" opacity="0.3" />
+  <ellipse cx="234" cy="185" rx="8" ry="15" fill="#c27d50" opacity="0.3" />
+
+  <!-- Jaw and Chin -->
+  <path d="M 132 155 Q 128 220 150 252 Q 180 270 210 252 Q 232 220 228 155 Z" fill="url(#skinTone)" />
+
+  <!-- Hair Base -->
+  <path d="M 125 155 Q 125 80 180 75 Q 235 80 235 155 Q 215 110 180 110 Q 145 110 125 155 Z" fill="url(#hairDark)" />
+  <!-- Sideburns & Neat Hairline -->
+  <path d="M 128 150 Q 140 100 185 95 Q 225 98 232 150 Q 225 125 180 122 Q 138 125 128 150 Z" fill="#1e1b18" />
+
+  <!-- Eyebrows -->
+  <path d="M 142 162 Q 160 158 170 164" stroke="#171717" stroke-width="4.5" stroke-linecap="round" fill="none" />
+  <path d="M 190 164 Q 200 158 218 162" stroke="#171717" stroke-width="4.5" stroke-linecap="round" fill="none" />
+
+  <!-- Eyes -->
+  <!-- Left Eye -->
+  <ellipse cx="157" cy="176" rx="9" ry="5.5" fill="#ffffff" />
+  <circle cx="157" cy="176" r="4.2" fill="#3e2723" />
+  <circle cx="157" cy="176" r="2.2" fill="#000000" />
+  <circle cx="155.5" cy="174.5" r="1.2" fill="#ffffff" />
+  <path d="M 148 173 Q 157 169 166 173" stroke="#262626" stroke-width="1.8" fill="none" />
+
+  <!-- Right Eye -->
+  <ellipse cx="203" cy="176" rx="9" ry="5.5" fill="#ffffff" />
+  <circle cx="203" cy="176" r="4.2" fill="#3e2723" />
+  <circle cx="203" cy="176" r="2.2" fill="#000000" />
+  <circle cx="201.5" cy="174.5" r="1.2" fill="#ffffff" />
+  <path d="M 194 173 Q 203 169 212 173" stroke="#262626" stroke-width="1.8" fill="none" />
+
+  <!-- Nose -->
+  <path d="M 180 168 L 177 202 Q 170 210 178 214 Q 180 215 182 214 Q 190 210 183 202 Z" fill="#c27d50" opacity="0.4" />
+  <path d="M 174 210 Q 180 215 186 210" stroke="#78350f" stroke-width="1.5" stroke-linecap="round" fill="none" />
+
+  <!-- Lips / Mouth -->
+  <path d="M 166 232 Q 180 236 194 232" stroke="#9a3412" stroke-width="2.5" stroke-linecap="round" fill="none" />
+  <path d="M 170 236 Q 180 242 190 236" stroke="#c2410c" stroke-width="1.5" stroke-linecap="round" fill="none" />
+
+  <!-- Gold Decorative Border Frame -->
+  <rect x="6" y="6" width="348" height="468" rx="8" fill="none" stroke="url(#goldGradient)" stroke-width="4" />
+  <rect x="12" y="12" width="336" height="456" rx="6" fill="none" stroke="#38bdf8" stroke-width="1" opacity="0.8" />
+
+  <!-- Bottom Title Banner -->
+  <g transform="translate(20, 432)">
+    <rect width="320" height="36" rx="6" fill="#030d22" stroke="url(#goldGradient)" stroke-width="1.5" opacity="0.95" />
+    <text x="160" y="16" font-family="Arial, sans-serif" font-size="11" font-weight="900" fill="#fef08a" text-anchor="middle" letter-spacing="1">KADISKOMLEKAU</text>
+    <text x="160" y="29" font-family="Arial, sans-serif" font-size="9" font-weight="700" fill="#bae6fd" text-anchor="middle" letter-spacing="0.5">Marsma TNI I Gusti Komang Alit</text>
+  </g>
+</svg>
