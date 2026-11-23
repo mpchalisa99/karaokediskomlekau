@@ -46,9 +46,12 @@ export const Header: React.FC = () => {
       <div className="mx-auto flex max-w-7xl items-center justify-between gap-3">
         {/* Brand Logo & Military Slogan */}
         <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
-          <div className="relative flex h-10 w-10 sm:h-11 sm:w-11 items-center justify-center rounded-2xl bg-[#0b1b3d] shadow-md shadow-sky-500/30 border-2 border-sky-400/50 shrink-0 overflow-hidden">
-            <img src="/icon.svg" alt="Logo DISKOMLEKAU" className="h-full w-full object-contain p-0.5" />
-            <Zap className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-amber-300 fill-amber-300 absolute -top-0.5 -right-0.5 drop-shadow-[0_0_8px_rgba(251,191,36,0.9)] animate-pulse" />
+          <div className="relative flex h-10 w-10 sm:h-11 sm:w-11 items-center justify-center rounded-full bg-[#02060d] shadow-md shadow-sky-500/30 border-2 border-sky-400/60 shrink-0 overflow-hidden">
+            <img
+              src="/assets/aistudio/1795037935766_8c0daa07.jpg"
+              alt="Logo DISKOMLEKAU Karaoke"
+              className="h-full w-full object-cover"
+            />
           </div>
           <div className="flex items-center gap-2 flex-nowrap whitespace-nowrap min-w-0">
             <div className="flex items-center gap-1 shrink-0">

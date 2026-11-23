@@ -1637,9 +1637,12 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
         <div className="flex items-center justify-between gap-2">
           {/* Logo & TV Connection Status */}
           <div className="flex items-center gap-2">
-            <div className="relative flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-tr from-sky-600 to-blue-800 text-white shadow shrink-0 border border-sky-400/40">
-              <Mic className="h-4.5 w-4.5 text-sky-200" />
-              <Zap className="h-3 w-3 text-amber-300 fill-amber-300 absolute -top-1 -right-1 drop-shadow-[0_0_6px_rgba(251,191,36,0.9)] animate-pulse" />
+            <div className="relative flex h-9 w-9 items-center justify-center rounded-full bg-[#02060d] shadow shrink-0 border border-sky-400/60 overflow-hidden">
+              <img
+                src="/assets/aistudio/1795037935766_8c0daa07.jpg"
+                alt="Logo DISKOMLEKAU Karaoke"
+                className="h-full w-full object-cover"
+              />
             </div>
             <div>
               <div className="flex items-center gap-1.5">

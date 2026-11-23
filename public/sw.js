@@ -1,15 +1,15 @@
 // Service Worker for Karaoke Diskomlekau TNI AU PWA
-const CACHE_NAME = 'karaoke-diskomlekau-v2';
+const CACHE_NAME = 'karaoke-diskomlekau-v3';
 const STATIC_ASSETS = [
   '/',
   '/manifest.json',
   '/manifest.webmanifest',
   '/favicon.ico',
-  '/icon.svg',
   '/apple-touch-icon.png',
   '/pwa-192x192.png',
   '/pwa-512x512.png',
-  '/pwa-maskable-512x512.png'
+  '/pwa-maskable-512x512.png',
+  '/assets/aistudio/1795037935766_8c0daa07.jpg'
 ];
 
 self.addEventListener('install', (event) => {
