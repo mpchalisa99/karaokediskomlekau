@@ -97,8 +97,25 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
 
   // Master Room State (Synchronized with TV & Tablet)
   const [currentSong, setCurrentSong] = useState<Song | null>(null);
+  const [currentSinger, setCurrentSinger] = useState<string | null>(null);
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [queue, setQueue] = useState<QueueItem[]>([]);
+  const [isMcSpeakingOnTv, setIsMcSpeakingOnTv] = useState<boolean>(false);
+  const mcSpeakingLockTimerRef = useRef<any>(null);
+
+  const setMcSpeakingLock = useCallback((speaking: boolean) => {
+    if (mcSpeakingLockTimerRef.current) {
+      clearTimeout(mcSpeakingLockTimerRef.current);
+      mcSpeakingLockTimerRef.current = null;
+    }
+    setIsMcSpeakingOnTv(speaking);
+    if (speaking) {
+      mcSpeakingLockTimerRef.current = setTimeout(() => {
+        setIsMcSpeakingOnTv(false);
+        mcSpeakingLockTimerRef.current = null;
+      }, 12000);
+    }
+  }, []);
 
   // Navigation State: 6 Clear, Intuitive Tabs (including Mic Wireless & Dewan Juri Prajurit)
   const [activeTab, setActiveTab] = useState<'search' | 'mic' | 'queue' | 'reactions' | 'curated' | 'jury'>('search');
@@ -393,7 +410,9 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
           setIsConnected(true);
           setConnectionStatus('connected');
           if (data.room.currentSong !== undefined) setCurrentSong(data.room.currentSong);
+          if (data.room.currentSinger !== undefined) setCurrentSinger(data.room.currentSinger);
           if (typeof data.room.isPlaying === 'boolean') setIsPlaying(data.room.isPlaying);
+          if (typeof data.room.isMcSpeaking === 'boolean') setMcSpeakingLock(data.room.isMcSpeaking);
           if (Array.isArray(data.room.queue)) setQueue(data.room.queue);
           if (typeof data.room.musicDelayMs === 'number') setTvMusicDelay(data.room.musicDelayMs);
           if (typeof data.room.musicVolume === 'number') setMusicVolume(data.room.musicVolume);
@@ -417,7 +436,7 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
         setConnectionStatus('reconnecting');
       }
     }
-  }, [roomId, singerName, clientId]);
+  }, [roomId, singerName, clientId, setMcSpeakingLock]);
 
   // PeerJS Client connection & auto-reconnect logic (Serverless direct TV-HP connections)
   const establishDataConnection = useCallback((peer: Peer, targetTvId: string) => {
@@ -437,7 +456,13 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
     conn.on('data', (data: any) => {
       if (data && data.action === 'STATUS_UPDATE') {
         if (data.song !== undefined) setCurrentSong(data.song);
+        if (data.currentSinger !== undefined || data.payload?.currentSinger !== undefined) {
+          setCurrentSinger(data.currentSinger ?? data.payload?.currentSinger ?? null);
+        }
         if (typeof data.isPlaying === 'boolean') setIsPlaying(data.isPlaying);
+        if (typeof data.isMcSpeaking === 'boolean' || typeof data.payload?.isMcSpeaking === 'boolean') {
+          setMcSpeakingLock(Boolean(data.isMcSpeaking ?? data.payload?.isMcSpeaking));
+        }
         if (Array.isArray(data.queue)) setQueue(data.queue);
         if (typeof data.clientCount === 'number') setClientCount(data.clientCount);
         if (typeof data.payload?.musicDelayMs === 'number') setTvMusicDelay(data.payload.musicDelayMs);
@@ -449,6 +474,9 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
         }
         setIsConnected(true);
         setPeerConnectionState('connected');
+      }
+      if (data && data.action === 'SMART_MC_STATUS') {
+        setMcSpeakingLock(Boolean(data.payload?.isSpeaking));
       }
       if (data && (data.action === 'SET_MUSIC_VOLUME' || data.action === 'SET_VOLUME')) {
         if (typeof data.payload?.volume === 'number') setMusicVolume(data.payload.volume);
@@ -472,7 +500,7 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
       setPeerConnectionState('disconnected');
       schedulePeerReconnect();
     });
-  }, [singerName, showToast]);
+  }, [singerName, showToast, setMcSpeakingLock]);
 
   const schedulePeerReconnect = useCallback(() => {
     if (reconnectPeerTimerRef.current) clearTimeout(reconnectPeerTimerRef.current);
@@ -946,7 +974,9 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
               case 'STATE_UPDATE':
                 if (data.payload) {
                   if (data.payload.currentSong !== undefined) setCurrentSong(data.payload.currentSong);
+                  if (data.payload.currentSinger !== undefined) setCurrentSinger(data.payload.currentSinger);
                   if (data.payload.isPlaying !== undefined) setIsPlaying(data.payload.isPlaying);
+                  if (typeof data.payload.isMcSpeaking === 'boolean') setMcSpeakingLock(data.payload.isMcSpeaking);
                   if (Array.isArray(data.payload.queue)) setQueue(data.payload.queue);
                   if (data.payload.clientCount !== undefined) setClientCount(data.payload.clientCount);
                   if (typeof data.payload.musicDelayMs === 'number') setTvMusicDelay(data.payload.musicDelayMs);
@@ -989,6 +1019,7 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
               case 'PLAY_NOW':
                 if (data.payload?.song) {
                   setCurrentSong(data.payload.song);
+                  if (data.payload?.singerName) setCurrentSinger(data.payload.singerName);
                   setIsPlaying(true);
                 }
                 break;
@@ -996,6 +1027,9 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
               case 'SKIP_NEXT':
                 if (data.payload?.currentSong !== undefined) {
                   setCurrentSong(data.payload.currentSong);
+                }
+                if (data.payload?.currentSinger !== undefined) {
+                  setCurrentSinger(data.payload.currentSinger);
                 }
                 if (Array.isArray(data.payload?.queue)) {
                   setQueue(data.payload.queue);
@@ -1007,6 +1041,17 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
                   setIsPlaying(data.payload.isPlaying);
                 } else {
                   setIsPlaying((prev) => !prev);
+                }
+                break;
+
+              case 'SMART_MC_STATUS':
+                setMcSpeakingLock(Boolean(data.payload?.isSpeaking));
+                break;
+
+              case 'TRIGGER_SMART_MC':
+                setMcSpeakingLock(true);
+                if (data.payload?.announcement) {
+                  setLastMcPreview(data.payload.announcement);
                 }
                 break;
 
@@ -1111,7 +1156,9 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
             const data = JSON.parse(event.data);
             if (data.type === 'INIT_STATE' || data.type === 'STATE_UPDATE') {
               if (data.payload?.currentSong !== undefined) setCurrentSong(data.payload.currentSong);
+              if (data.payload?.currentSinger !== undefined) setCurrentSinger(data.payload.currentSinger);
               if (data.payload?.isPlaying !== undefined) setIsPlaying(data.payload.isPlaying);
+              if (typeof data.payload?.isMcSpeaking === 'boolean') setMcSpeakingLock(data.payload.isMcSpeaking);
               if (Array.isArray(data.payload?.queue)) setQueue(data.payload.queue);
               if (data.payload?.clientCount) setClientCount(data.payload.clientCount);
               setIsConnected(true);
@@ -1120,10 +1167,17 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
               setQueue(data.payload.queue);
             } else if (data.type === 'PLAY_NOW' && data.payload?.song) {
               setCurrentSong(data.payload.song);
+              if (data.payload?.singerName) setCurrentSinger(data.payload.singerName);
               setIsPlaying(true);
             } else if (data.type === 'SKIP_NEXT') {
               if (data.payload?.currentSong !== undefined) setCurrentSong(data.payload.currentSong);
+              if (data.payload?.currentSinger !== undefined) setCurrentSinger(data.payload.currentSinger);
               if (Array.isArray(data.payload?.queue)) setQueue(data.payload.queue);
+            } else if (data.type === 'SMART_MC_STATUS') {
+              setMcSpeakingLock(Boolean(data.payload?.isSpeaking));
+            } else if (data.type === 'TRIGGER_SMART_MC') {
+              setMcSpeakingLock(true);
+              if (data.payload?.announcement) setLastMcPreview(data.payload.announcement);
             } else if (data.type === 'TOGGLE_PAUSE') {
               if (data.payload?.isPlaying !== undefined) setIsPlaying(data.payload.isPlaying);
               else setIsPlaying((p) => !p);
@@ -1192,7 +1246,7 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
       if (socket) socket.close();
       if (sseSource) sseSource.close();
     };
-  }, [roomId, singerName, clientId, fetchRoomState]);
+  }, [roomId, singerName, clientId, fetchRoomState, setMcSpeakingLock]);
 
   // Execute YouTube Search
   const executeSearch = useCallback(
@@ -1300,6 +1354,7 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
 
     if (!currentSong) {
       setCurrentSong(song);
+      setCurrentSinger(singerName);
       setIsPlaying(true);
     }
 
@@ -1316,6 +1371,7 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
       if (res.ok) {
         const data = await res.json();
         if (data.currentSong) setCurrentSong(data.currentSong);
+        if (data.currentSinger !== undefined) setCurrentSinger(data.currentSinger);
         if (Array.isArray(data.queue)) {
           setQueue(data.queue);
         }
@@ -1332,6 +1388,7 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
   // Play song immediately on the TV
   const handlePlayNow = async (song: Song) => {
     setCurrentSong(song);
+    setCurrentSinger(singerName);
     setIsPlaying(true);
 
     // Multi-Channel Dispatch
@@ -1364,6 +1421,7 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
       nextSongItem = queue[0].song;
       nextQueueId = queue[0].queueId;
       setCurrentSong(nextSongItem);
+      setCurrentSinger(queue[0].singerName || null);
       setQueue((prev) => prev.slice(1));
     }
 
@@ -1541,6 +1599,11 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
 
   // Trigger Smart MC Pantun Diskomlekau on Master TV Screen (100% Local Engine, No API Key)
   const handleTriggerSmartMc = async (withScore?: number | null) => {
+    if (isMcSpeakingOnTv) {
+      showToast('⏳ Tunggu pantun MC pertama selesai dibacakan di TV!');
+      return;
+    }
+
     if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
       try {
         navigator.vibrate([50, 30, 70]);
@@ -1554,48 +1617,50 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
         ? Math.round(juryVotersList.reduce((acc, v) => acc + v.score, 0) / juryVotersList.length)
         : undefined;
 
+    const vocalistName = currentSinger || singerName || 'Prajurit Diskomlekau';
+    const songTitle = currentSong?.title || 'Lagu Pilihan Prajurit';
+
     const announcement = generateSmartMcAnnouncement({
-      singerName: singerName || 'Prajurit Diskomlekau',
-      songTitle: currentSong?.title || 'Lagu Pilihan Prajurit',
+      singerName: vocalistName,
+      songTitle,
       score: effectiveScore,
       forceTier: typeof withScore === 'number' ? undefined : 'manual',
       triggeredBy: singerName,
       isManual: true,
     });
 
+    setMcSpeakingLock(true);
     setLastMcPreview(announcement);
 
-    // 1. PeerJS DataConnection P2P
-    sendPeerAction('TRIGGER_SMART_MC', {
+    const payload = {
       announcement,
-      singerName,
-      songTitle: currentSong?.title || 'Lagu Pilihan Prajurit',
+      singerName: vocalistName,
+      senderName: singerName,
+      songTitle,
       score: effectiveScore,
       isManual: true,
-    });
+    };
+
+    // 1. PeerJS DataConnection P2P
+    sendPeerAction('TRIGGER_SMART_MC', payload);
 
     // 2. WebSocket (with retry queue)
-    sendWsReliable('TRIGGER_SMART_MC', {
-      announcement,
-      singerName,
-      songTitle: currentSong?.title || 'Lagu Pilihan Prajurit',
-      score: effectiveScore,
-      isManual: true,
-    });
+    sendWsReliable('TRIGGER_SMART_MC', payload);
 
     // 3. HTTP Fallback
     try {
-      await fetch(`/api/room/${encodeURIComponent(roomId)}/smart-mc`, {
+      const res = await fetch(`/api/room/${encodeURIComponent(roomId)}/smart-mc`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          announcement,
-          singerName,
-          songTitle: currentSong?.title || 'Lagu Pilihan Prajurit',
-          score: effectiveScore,
-          isManual: true,
-        }),
+        body: JSON.stringify(payload),
       });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.skipped === 'mc_busy') {
+          showToast('⏳ Pantun MC pertama sedang berlangsung di TV!');
+          return;
+        }
+      }
     } catch {}
 
     showToast('🎙️ Pantun Smart MC ditampilkan & dibacakan di Layar TV!');
@@ -1830,10 +1895,11 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
 
               <button
                 onClick={() => handleTriggerSmartMc()}
-                className="flex items-center gap-1 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 px-2.5 py-2 text-[10px] font-black text-slate-950 shadow transition active:scale-95 border border-emerald-300"
-                title="Panggil Pantun Smart MC Diskomlekau di Layar TV"
+                disabled={isMcSpeakingOnTv}
+                className="flex items-center gap-1 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 px-2.5 py-2 text-[10px] font-black text-slate-950 shadow transition active:scale-95 border border-emerald-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                title={isMcSpeakingOnTv ? 'Tunggu pantun MC pertama selesai' : 'Panggil Pantun Smart MC Diskomlekau di Layar TV'}
               >
-                <span>🎙️ Pantun MC</span>
+                <span>{isMcSpeakingOnTv ? '⏳ MC Bicara' : '🎙️ Pantun MC'}</span>
               </button>
             </div>
           </div>
@@ -1843,9 +1909,10 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
             <div className="flex items-center gap-1.5">
               <button
                 onClick={() => handleTriggerSmartMc()}
-                className="rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 px-2.5 py-1.5 text-[11px] font-black text-slate-950 shadow border border-emerald-300 active:scale-95 transition"
+                disabled={isMcSpeakingOnTv}
+                className="rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 px-2.5 py-1.5 text-[11px] font-black text-slate-950 shadow border border-emerald-300 active:scale-95 transition disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                🎙️ Pantun MC
+                {isMcSpeakingOnTv ? '⏳ MC Bicara...' : '🎙️ Pantun MC'}
               </button>
               <button
                 onClick={() => setActiveTab('search')}
@@ -3168,7 +3235,8 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
               {/* SMART MC DISKOMLEKAU - PANTUN JENAKA & SUARA BAHASA INDONESIA */}
               <button
                 onClick={() => handleTriggerSmartMc()}
-                className="col-span-2 flex items-center justify-between rounded-2xl bg-gradient-to-r from-emerald-950 via-teal-900 to-sky-950 border-2 border-emerald-400 p-3.5 text-left text-white shadow-xl shadow-emerald-950/70 active:scale-95 transition cursor-pointer"
+                disabled={isMcSpeakingOnTv}
+                className="col-span-2 flex items-center justify-between rounded-2xl bg-gradient-to-r from-emerald-950 via-teal-900 to-sky-950 border-2 border-emerald-400 p-3.5 text-left text-white shadow-xl shadow-emerald-950/70 active:scale-95 transition cursor-pointer disabled:opacity-55 disabled:cursor-not-allowed"
               >
                 <div className="flex items-center gap-3">
                   <span className="text-4xl animate-pulse">🎙️</span>
@@ -3177,12 +3245,14 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
                       PANTUN MC DISKOMLEKAU
                     </h4>
                     <p className="text-[11px] text-sky-200 mt-0.5">
-                      Tampilkan banner &amp; bacakan pantun jenaka TNI AU di TV! 🔊
+                      {isMcSpeakingOnTv
+                        ? 'Pantun MC pertama sedang dibacakan di TV, harap tunggu...'
+                        : 'Tampilkan banner & bacakan pantun jenaka TNI AU di TV! 🔊'}
                     </p>
                   </div>
                 </div>
                 <span className="rounded-xl bg-emerald-400 px-3 py-1.5 text-xs font-black uppercase text-slate-950 shadow shrink-0">
-                  Pantun MC
+                  {isMcSpeakingOnTv ? 'Berbicara...' : 'Pantun MC'}
                 </span>
               </button>
 
@@ -3198,9 +3268,11 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
                     <p className="text-amber-300 font-black not-italic">&ldquo;{lastMcPreview.pantunLines[2]}&rdquo;</p>
                     <p className="text-amber-300 font-black not-italic">&ldquo;{lastMcPreview.pantunLines[3]}&rdquo;</p>
                   </div>
-                  <p className="text-[11px] text-sky-200 pt-1 border-t border-sky-900/60">
-                    {lastMcPreview.commentary}
-                  </p>
+                  {Boolean(lastMcPreview.commentary && lastMcPreview.commentary.trim()) && (
+                    <p className="text-[11px] text-sky-200 pt-1 border-t border-sky-900/60">
+                      {lastMcPreview.commentary}
+                    </p>
+                  )}
                 </div>
               )}
 
@@ -3837,10 +3909,15 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
               {/* Tombol Panggil Pantun Smart MC Sesuai Nilai Juri */}
               <button
                 type="button"
+                disabled={isMcSpeakingOnTv}
                 onClick={() => handleTriggerSmartMc(juryScoreInput)}
-                className="w-full py-3 px-4 rounded-2xl font-black text-xs sm:text-sm tracking-wide transition flex items-center justify-center gap-2 shadow-lg bg-gradient-to-r from-emerald-600 via-teal-500 to-emerald-600 hover:from-emerald-500 hover:to-teal-400 text-white border-2 border-emerald-300 active:scale-98 cursor-pointer"
+                className="w-full py-3 px-4 rounded-2xl font-black text-xs sm:text-sm tracking-wide transition flex items-center justify-center gap-2 shadow-lg bg-gradient-to-r from-emerald-600 via-teal-500 to-emerald-600 hover:from-emerald-500 hover:to-teal-400 text-white border-2 border-emerald-300 active:scale-98 cursor-pointer disabled:opacity-55 disabled:cursor-not-allowed"
               >
-                <span>🎙️ PANGGIL PANTUN MC (NILAI {juryScoreInput}) KE LAYAR TV</span>
+                <span>
+                  {isMcSpeakingOnTv
+                    ? '⏳ TUNGGU PANTUN MC SELESAI DI TV...'
+                    : `🎙️ PANGGIL PANTUN MC (NILAI ${juryScoreInput}) KE LAYAR TV`}
+                </span>
               </button>
 
               {/* Feedback Status Pengiriman */}

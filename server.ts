@@ -28,7 +28,11 @@ interface ConnectedClient {
 interface RoomState {
   roomId: string;
   currentSong: any | null;
+  currentSinger?: string | null;
   isPlaying: boolean;
+  isMcSpeaking?: boolean;
+  lastSmartMcId?: string;
+  lastSmartMcAt?: number;
   queue: any[];
   history: any[];
   clients: Map<string, ConnectedClient>;
@@ -50,7 +54,11 @@ function getOrCreateRoom(roomId: string): RoomState {
     room = {
       roomId: cleanId,
       currentSong: null,
+      currentSinger: null,
       isPlaying: false,
+      isMcSpeaking: false,
+      lastSmartMcId: undefined,
+      lastSmartMcAt: 0,
       queue: [],
       history: [],
       clients: new Map(),
@@ -520,9 +528,10 @@ async function startServer() {
   // Master syncs current state to server
   app.post('/api/room/:roomId/sync', (req, res) => {
     const room = getOrCreateRoom(req.params.roomId);
-    const { currentSong, isPlaying, queue, history, musicDelayMs, musicVolume, isMuted } = req.body;
+    const { currentSong, currentSinger, isPlaying, queue, history, musicDelayMs, musicVolume, isMuted } = req.body;
 
     if (currentSong !== undefined) room.currentSong = currentSong;
+    if (currentSinger !== undefined) room.currentSinger = currentSinger;
     if (isPlaying !== undefined) room.isPlaying = isPlaying;
     if (Array.isArray(queue)) room.queue = queue;
     if (Array.isArray(history)) room.history = history;
@@ -537,7 +546,9 @@ async function startServer() {
       roomId: room.roomId,
       payload: {
         currentSong: room.currentSong,
+        currentSinger: room.currentSinger ?? null,
         isPlaying: room.isPlaying,
+        isMcSpeaking: Boolean(room.isMcSpeaking),
         queue: room.queue,
         musicDelayMs: room.musicDelayMs,
         musicVolume: room.musicVolume,
@@ -682,7 +693,9 @@ async function startServer() {
       room: {
         roomId: room.roomId,
         currentSong: room.currentSong,
+        currentSinger: room.currentSinger ?? null,
         isPlaying: room.isPlaying,
+        isMcSpeaking: Boolean(room.isMcSpeaking),
         queue: room.queue,
         musicDelayMs: room.musicDelayMs ?? 70,
         musicVolume: room.musicVolume ?? 100,
@@ -734,6 +747,7 @@ async function startServer() {
     let isCurrent = false;
     if (!room.currentSong) {
       room.currentSong = song;
+      room.currentSinger = finalSinger;
       room.isPlaying = true;
       isCurrent = true;
     } else {
@@ -765,6 +779,7 @@ async function startServer() {
       roomId: room.roomId,
       payload: {
         currentSong: room.currentSong,
+        currentSinger: room.currentSinger ?? null,
         isPlaying: room.isPlaying,
         queue: room.queue,
         clientCount: room.clients.size,
@@ -877,6 +892,7 @@ async function startServer() {
     }
 
     room.currentSong = song;
+    room.currentSinger = singerName || 'Prajurit (HP)';
     room.isPlaying = true;
     room.juryVotes.clear();
     room.lastUpdated = Date.now();
@@ -884,11 +900,11 @@ async function startServer() {
     broadcastToRoom(room, {
       type: 'PLAY_NOW',
       roomId: room.roomId,
-      payload: { song, singerName: singerName || 'Prajurit (HP)' },
+      payload: { song, singerName: room.currentSinger },
       timestamp: Date.now(),
     });
 
-    res.json({ success: true, currentSong: room.currentSong });
+    res.json({ success: true, currentSong: room.currentSong, currentSinger: room.currentSinger });
   });
 
   // Client skips to next song
@@ -899,7 +915,7 @@ async function startServer() {
 
     // Debounce rapid repeated skips within 1200ms
     if (now - (room.lastSkipAt || 0) < 1200) {
-      return res.json({ success: true, currentSong: room.currentSong, queue: room.queue, debounced: true });
+      return res.json({ success: true, currentSong: room.currentSong, currentSinger: room.currentSinger ?? null, queue: room.queue, debounced: true });
     }
     room.lastSkipAt = now;
     room.juryVotes.clear();
@@ -909,27 +925,33 @@ async function startServer() {
       if (idx !== -1) {
         const [target] = room.queue.splice(idx, 1);
         room.currentSong = target.song;
+        room.currentSinger = target.singerName || singerName || null;
         room.isPlaying = true;
       } else if (nextSong && nextSong.id) {
         room.currentSong = nextSong;
+        room.currentSinger = singerName || null;
         room.isPlaying = true;
       }
     } else if (nextSong && nextSong.id) {
       room.currentSong = nextSong;
-      room.isPlaying = true;
-      // Remove ONLY the first matching entry from queue, preserving duplicate songs queued later
       const idx = room.queue.findIndex((q) => q.song?.id === nextSong.id);
       if (idx !== -1) {
-        room.queue.splice(idx, 1);
+        const [matched] = room.queue.splice(idx, 1);
+        room.currentSinger = matched.singerName || singerName || null;
+      } else {
+        room.currentSinger = singerName || null;
       }
+      room.isPlaying = true;
     } else if (room.queue.length > 0) {
       const nextItem = room.queue.shift();
       if (nextItem) {
         room.currentSong = nextItem.song;
+        room.currentSinger = nextItem.singerName || null;
         room.isPlaying = true;
       }
     } else {
       room.currentSong = null;
+      room.currentSinger = null;
       room.isPlaying = false;
     }
     room.lastUpdated = now;
@@ -937,7 +959,12 @@ async function startServer() {
     broadcastToRoom(room, {
       type: 'SKIP_NEXT',
       roomId: room.roomId,
-      payload: { currentSong: room.currentSong, queue: room.queue, senderName: singerName || 'Prajurit (HP)' },
+      payload: {
+        currentSong: room.currentSong,
+        currentSinger: room.currentSinger ?? null,
+        queue: room.queue,
+        senderName: singerName || 'Prajurit (HP)',
+      },
       timestamp: now,
     });
 
@@ -946,6 +973,7 @@ async function startServer() {
       roomId: room.roomId,
       payload: {
         currentSong: room.currentSong,
+        currentSinger: room.currentSinger ?? null,
         isPlaying: room.isPlaying,
         queue: room.queue,
         clientCount: room.clients.size,
@@ -953,7 +981,7 @@ async function startServer() {
       timestamp: now,
     });
 
-    res.json({ success: true, currentSong: room.currentSong, queue: room.queue });
+    res.json({ success: true, currentSong: room.currentSong, currentSinger: room.currentSinger ?? null, queue: room.queue });
   });
 
   // Client toggles play / pause on the TV & Tablet
@@ -999,18 +1027,27 @@ async function startServer() {
   app.post('/api/room/:roomId/smart-mc', (req, res) => {
     const room = getOrCreateRoom(req.params.roomId);
     const { singerName, songTitle, score, forceTier, announcement } = req.body || {};
+    const now = Date.now();
+    const mcId = announcement?.id;
+
+    // Deduplicate identical announcement ID or concurrent requests while MC is speaking
+    if ((mcId && room.lastSmartMcId === mcId) || (room.isMcSpeaking && now - (room.lastSmartMcAt || 0) < 12000)) {
+      return res.json({ success: true, deduped: true });
+    }
+    if (mcId) room.lastSmartMcId = mcId;
+    room.lastSmartMcAt = now;
 
     broadcastToRoom(room, {
       type: 'TRIGGER_SMART_MC',
       roomId: room.roomId,
       payload: {
-        singerName: singerName || 'Prajurit (HP)',
+        singerName: room.currentSinger || singerName || 'Prajurit (HP)',
         songTitle: songTitle || room.currentSong?.title || 'Lagu Pilihan Prajurit',
         score,
         forceTier,
         announcement,
       },
-      timestamp: Date.now(),
+      timestamp: now,
     });
 
     res.json({ success: true });
@@ -1208,7 +1245,9 @@ async function startServer() {
         assignedClientId: clientId,
         payload: {
           currentSong: room.currentSong,
+          currentSinger: room.currentSinger ?? null,
           isPlaying: room.isPlaying,
+          isMcSpeaking: Boolean(room.isMcSpeaking),
           queue: room.queue,
           musicDelayMs: room.musicDelayMs ?? 70,
           musicVolume: room.musicVolume ?? 100,
@@ -1373,6 +1412,7 @@ async function startServer() {
             const singer = msg.payload?.singerName || singerName;
             if (song && song.id) {
               room.currentSong = song;
+              room.currentSinger = singer;
               room.isPlaying = true;
               room.juryVotes.clear();
               room.lastUpdated = Date.now();
@@ -1401,15 +1441,43 @@ async function startServer() {
           }
 
           case 'TRIGGER_SMART_MC': {
+            const now = Date.now();
+            const mcId = msg.payload?.announcement?.id;
+            if ((mcId && room.lastSmartMcId === mcId) || (room.isMcSpeaking && now - (room.lastSmartMcAt || 0) < 12000)) {
+              break;
+            }
+            if (mcId) room.lastSmartMcId = mcId;
+            room.lastSmartMcAt = now;
+
             broadcastToRoom(room, {
               type: 'TRIGGER_SMART_MC',
               roomId: room.roomId,
               payload: {
                 ...(msg.payload || {}),
+                singerName: room.currentSinger || msg.payload?.singerName || singerName,
                 senderName: msg.payload?.senderName || msg.payload?.singerName || singerName,
               },
-              timestamp: Date.now(),
+              timestamp: now,
             });
+            break;
+          }
+
+          case 'SMART_MC_STATUS': {
+            const speaking = Boolean(msg.payload?.isSpeaking);
+            room.isMcSpeaking = speaking;
+            if (speaking) {
+              room.lastSmartMcAt = Date.now();
+            }
+            broadcastToRoom(
+              room,
+              {
+                type: 'SMART_MC_STATUS',
+                roomId: room.roomId,
+                payload: { isSpeaking: speaking },
+                timestamp: Date.now(),
+              },
+              ws
+            );
             break;
           }
 
@@ -1427,31 +1495,46 @@ async function startServer() {
                 if (idx !== -1) {
                   const [target] = room.queue.splice(idx, 1);
                   room.currentSong = target.song;
+                  room.currentSinger = target.singerName || singerName || null;
                   room.isPlaying = true;
                 } else if (nextSong && nextSong.id) {
                   room.currentSong = nextSong;
+                  room.currentSinger = singerName || null;
                   room.isPlaying = true;
                 }
               } else if (nextSong && nextSong.id) {
                 room.currentSong = nextSong;
-                room.isPlaying = true;
                 const idx = room.queue.findIndex((q) => q.song?.id === nextSong.id);
                 if (idx !== -1) {
-                  room.queue.splice(idx, 1);
+                  const [matched] = room.queue.splice(idx, 1);
+                  room.currentSinger = matched.singerName || singerName || null;
+                } else {
+                  room.currentSinger = singerName || null;
                 }
+                room.isPlaying = true;
               } else if (room.queue.length > 0) {
                 const nextItem = room.queue.shift();
                 if (nextItem) {
                   room.currentSong = nextItem.song;
+                  room.currentSinger = nextItem.singerName || null;
                   room.isPlaying = true;
                 }
+              } else {
+                room.currentSong = null;
+                room.currentSinger = null;
+                room.isPlaying = false;
               }
               room.lastUpdated = now;
 
               broadcastToRoom(room, {
                 type: 'SKIP_NEXT',
                 roomId: room.roomId,
-                payload: { currentSong: room.currentSong, queue: room.queue, senderName: singerName },
+                payload: {
+                  currentSong: room.currentSong,
+                  currentSinger: room.currentSinger ?? null,
+                  queue: room.queue,
+                  senderName: singerName,
+                },
                 timestamp: now,
               });
 
@@ -1460,6 +1543,7 @@ async function startServer() {
                 roomId: room.roomId,
                 payload: {
                   currentSong: room.currentSong,
+                  currentSinger: room.currentSinger ?? null,
                   isPlaying: room.isPlaying,
                   queue: room.queue,
                   clientCount: room.clients.size,

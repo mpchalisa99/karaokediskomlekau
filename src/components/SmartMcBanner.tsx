@@ -224,6 +224,7 @@ export const SmartMcBanner: React.FC = () => {
 
           <button
             type="button"
+            disabled={isMcSpeaking}
             onClick={() => replaySmartMcSpeech()}
             style={{
               display: 'inline-flex',
@@ -231,21 +232,23 @@ export const SmartMcBanner: React.FC = () => {
               gap: '4px',
               padding: '5px 10px',
               borderRadius: '8px',
-              backgroundColor: '#0284c7',
+              backgroundColor: isMcSpeaking ? '#0369a1' : '#0284c7',
               color: '#ffffff',
               fontSize: '11px',
               fontWeight: 800,
               border: '1px solid #38bdf8',
-              cursor: 'pointer',
+              cursor: isMcSpeaking ? 'not-allowed' : 'pointer',
+              opacity: isMcSpeaking ? 0.55 : 1,
             }}
-            title="Bacakan ulang pantun dengan suara Bahasa Indonesia"
+            title={isMcSpeaking ? 'Tunggu pantun MC selesai dibacakan' : 'Bacakan ulang pantun'}
           >
             <Volume2 style={{ width: '13px', height: '13px' }} />
-            <span>Suara</span>
+            <span>{isMcSpeaking ? 'Berbicara...' : 'Suara'}</span>
           </button>
 
           <button
             type="button"
+            disabled={isMcSpeaking}
             onClick={() =>
               triggerSmartMc({
                 singerName,
@@ -263,14 +266,15 @@ export const SmartMcBanner: React.FC = () => {
               gap: '4px',
               padding: '5px 10px',
               borderRadius: '8px',
-              backgroundColor: '#f59e0b',
+              backgroundColor: isMcSpeaking ? '#b45309' : '#f59e0b',
               color: '#020617',
               fontSize: '11px',
               fontWeight: 900,
               border: '1px solid #fcd34d',
-              cursor: 'pointer',
+              cursor: isMcSpeaking ? 'not-allowed' : 'pointer',
+              opacity: isMcSpeaking ? 0.55 : 1,
             }}
-            title="Ganti pantun MC berikutnya"
+            title={isMcSpeaking ? 'Tunggu pantun pertama selesai dulu' : 'Ganti pantun MC berikutnya'}
           >
             <RefreshCw style={{ width: '13px', height: '13px' }} />
             <span>Pantun Lain</span>
@@ -410,45 +414,47 @@ export const SmartMcBanner: React.FC = () => {
         </div>
       </div>
 
-      {/* Komentar MC Militer TNI AU / Korps Elektronika */}
-      <div
-        style={{
-          marginTop: '8px',
-          display: 'flex',
-          alignItems: 'flex-start',
-          gap: '8px',
-          textAlign: 'left',
-          backgroundColor: 'rgba(8, 47, 73, 0.65)',
-          borderRadius: '10px',
-          padding: '7px 12px',
-          border: '1px solid rgba(56, 189, 248, 0.3)',
-          boxSizing: 'border-box',
-        }}
-      >
-        <span
+      {/* Komentar MC hanya ditampilkan jika terisi */}
+      {Boolean(commentary && commentary.trim()) && (
+        <div
           style={{
-            fontSize: '11px',
-            fontWeight: 900,
-            color: '#6ee7b7',
-            flexShrink: 0,
-            fontFamily: 'monospace',
+            marginTop: '8px',
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: '8px',
+            textAlign: 'left',
+            backgroundColor: 'rgba(8, 47, 73, 0.65)',
+            borderRadius: '10px',
+            padding: '7px 12px',
+            border: '1px solid rgba(56, 189, 248, 0.3)',
+            boxSizing: 'border-box',
           }}
         >
-          [KOMENTAR MC]:
-        </span>
-        <p
-          style={{
-            margin: 0,
-            fontSize: '12px',
-            fontWeight: 700,
-            color: '#e0f2fe',
-            lineHeight: 1.4,
-            wordWrap: 'break-word',
-          }}
-        >
-          {commentary}
-        </p>
-      </div>
+          <span
+            style={{
+              fontSize: '11px',
+              fontWeight: 900,
+              color: '#6ee7b7',
+              flexShrink: 0,
+              fontFamily: 'monospace',
+            }}
+          >
+            [KOMENTAR MC]:
+          </span>
+          <p
+            style={{
+              margin: 0,
+              fontSize: '12px',
+              fontWeight: 700,
+              color: '#e0f2fe',
+              lineHeight: 1.4,
+              wordWrap: 'break-word',
+            }}
+          >
+            {commentary}
+          </p>
+        </div>
+      )}
     </aside>
   );
 };

@@ -523,11 +523,14 @@ export interface GenerateSmartMcOptions {
 
 export function generateSmartMcAnnouncement(options: GenerateSmartMcOptions = {}): SmartMcAnnouncement {
   const cleanSinger = (options.singerName || 'Prajurit Diskomlekau').trim();
-  const cleanSong =
+  const rawCleanSong =
     (options.songTitle || 'Lagu Pilihan Prajurit')
-      .replace(/\(.*?\)|\[.*?\]/g, '')
-      .replace(/karaoke|instrumental|no vocal|hd|lirik|lyrics/gi, '')
+      .replace(/\(.*?\)|\[.*?\]/g, ' ')
+      .replace(/\b(official|music\s*video|video\s*klip|mv|karaoke|instrumental|no\s*vocal|vokal|hd|4k|lyrics?|lirik|full\s*album|audio|cover)\b/gi, ' ')
+      .replace(/\s+/g, ' ')
       .trim() || 'Lagu Favorit';
+  const cleanSong = rawCleanSong.length > 48 ? rawCleanSong.slice(0, 48).trim() : rawCleanSong;
+
   const numericScore =
     typeof options.score === 'number' && !isNaN(options.score)
       ? Math.max(0, Math.min(100, Math.round(options.score)))
@@ -553,15 +556,15 @@ export function generateSmartMcAnnouncement(options: GenerateSmartMcOptions = {}
       .replace(/\{score\}/g, String(numericScore));
 
   const pantunLines = chosen.pantunLines.map(interpolate) as [string, string, string, string];
-  const commentary = interpolate(chosen.commentaryTemplate);
-  const fullSpeechText = `Pantun Smart M C Diskomlekau. ${pantunLines.join(', ')}. ${commentary}`;
+  // Narasi MC ringkas: HANYA vokalis yang memilih lagu, judul lagu, dan pantun
+  const fullSpeechText = `Vokalis ${cleanSinger}, lagu ${cleanSong}. ${pantunLines.join(', ')}.`;
 
   return {
     id: `mc-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
     tier,
     badge: chosen.badge,
     pantunLines,
-    commentary,
+    commentary: '',
     fullSpeechText,
     singerName: cleanSinger,
     songTitle: cleanSong,
@@ -573,14 +576,23 @@ export function generateSmartMcAnnouncement(options: GenerateSmartMcOptions = {}
   };
 }
 
-// Referensi global untuk elemen HTML5 <audio> Smart MC & timer penyelesaian
+// Referensi global untuk elemen HTML5 <audio> Smart MC, session lock & timer penyelesaian
 let activeMcAudioRef: HTMLAudioElement | null = null;
 let fallbackSpeechTimerRef: ReturnType<typeof setTimeout> | null = null;
 let isMcAudioUnlocked = false;
+let isPlaybackActive = false;
+let activePlaybackSessionId = 0;
 
 // Tiny silent WAV data URI for unlocking HTML5 <audio> on Samsung Tizen OS / iOS / Android
 const SILENT_UNLOCK_WAV =
   'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA';
+
+/**
+ * Mengecek secara sinkron apakah Smart MC masih sedang membacakan pantun
+ */
+export function isSmartMcPlaying(): boolean {
+  return isPlaybackActive;
+}
 
 /**
  * Membuka kunci policy autoplay HTML5 <audio> saat interaksi pertama di layar TV Samsung / browser.
@@ -638,6 +650,9 @@ export const SMART_MC_OFFLINE_FALLBACK_FILES: Record<SmartMcTier, string[]> = {
  * Menghentikan pemutaran audio Smart MC yang sedang berjalan (HTML5 <audio>)
  */
 export function stopSmartMcSpeech(): void {
+  activePlaybackSessionId += 1;
+  isPlaybackActive = false;
+
   if (fallbackSpeechTimerRef) {
     clearTimeout(fallbackSpeechTimerRef);
     fallbackSpeechTimerRef = null;
@@ -647,7 +662,7 @@ export function stopSmartMcSpeech(): void {
       activeMcAudioRef.onended = null;
       activeMcAudioRef.onerror = null;
       activeMcAudioRef.pause();
-      activeMcAudioRef.currentTime = 0;
+      activeMcAudioRef.src = '';
     } catch {
       // Abaikan error saat menghentikan audio di Tizen OS
     }
@@ -658,9 +673,9 @@ export function stopSmartMcSpeech(): void {
 /**
  * Memutar suara MC Wanita yang merdu & ramah menggunakan HTML5 <audio> (`new Audio(...)`)
  * (100% TANPA window.speechSynthesis agar berjalan normal di Smart TV Samsung Tizen OS):
- * 1. Prioritaskan file MP3 lokal MC Wanita di `/sounds/` (`/sounds/mc-wanita-pantun.mp3`, `/sounds/mc-wanita-komentar.mp3`, `/sounds/mc-wanita-sapa.mp3`)
- * 2. Cadangan otomatis ke `/api/tts` (suara wanita Bahasa Indonesia) jika file MP3 spesifik belum tersedia
- * 3. Cadangan offline ke MP3 lokal yang sudah ada + bus audioFx jika jaringan terputus
+ * 1. Mencegah pantun/suara baru jika pantun sebelumnya masih aktif berjalan (anti-duplikasi).
+ * 2. Menggunakan guard `attemptSettled` + `sessionId` agar kegagalan file (onerror + play().catch)
+ *    tidak pernah bercabang menjadi 2 suara paralel.
  */
 export function playSmartMcAudio(
   tierOrText: SmartMcTier | string = 'manual',
@@ -668,7 +683,19 @@ export function playSmartMcAudio(
   onEnd?: () => void,
   speechText?: string
 ): void {
-  stopSmartMcSpeech();
+  // Cegah pantun lain sebelum pantun pertama selesai!
+  if (isPlaybackActive) {
+    return;
+  }
+
+  activePlaybackSessionId += 1;
+  const sessionId = activePlaybackSessionId;
+  isPlaybackActive = true;
+
+  if (fallbackSpeechTimerRef) {
+    clearTimeout(fallbackSpeechTimerRef);
+    fallbackSpeechTimerRef = null;
+  }
 
   const isTier =
     tierOrText === 'low' || tierOrText === 'medium' || tierOrText === 'high' || tierOrText === 'manual';
@@ -676,17 +703,24 @@ export function playSmartMcAudio(
   const resolvedText =
     (speechText && speechText.trim()) ||
     (!isTier && tierOrText.trim()) ||
-    'Halo sobat Diskomlekau! Tetap semangat bernyanyi, pantang mundur walau suara hancur!';
+    'Vokalis Prajurit Diskomlekau, mari bernyanyi bersama.';
 
   let hasCompleted = false;
   const finishOnce = () => {
-    if (hasCompleted) return;
+    if (hasCompleted || sessionId !== activePlaybackSessionId) return;
     hasCompleted = true;
+    isPlaybackActive = false;
     if (fallbackSpeechTimerRef) {
       clearTimeout(fallbackSpeechTimerRef);
       fallbackSpeechTimerRef = null;
     }
-    activeMcAudioRef = null;
+    if (activeMcAudioRef) {
+      try {
+        activeMcAudioRef.onended = null;
+        activeMcAudioRef.onerror = null;
+      } catch {}
+      activeMcAudioRef = null;
+    }
     onEnd?.();
   };
 
@@ -697,18 +731,20 @@ export function playSmartMcAudio(
 
   onStart?.();
 
-  // Susun rantai prioritas audio:
+  // Susun rantai prioritas audio (1 jalur tunggal, berurutan tanpa paralel):
   // 1) File MP3 lokal MC Wanita -> 2) Endpoint /api/tts suara Indonesia -> 3) MP3 fallback lokal
   const localFemaleFiles = SMART_MC_AUDIO_FILES[resolvedTier] || SMART_MC_AUDIO_FILES.manual;
-  const ttsEndpoint = `/api/tts?text=${encodeURIComponent(resolvedText.slice(0, 380))}&tier=${encodeURIComponent(resolvedTier)}`;
+  const ttsEndpoint = `/api/tts?text=${encodeURIComponent(resolvedText.slice(0, 260))}&tier=${encodeURIComponent(resolvedTier)}`;
   const offlineFallbacks = SMART_MC_OFFLINE_FALLBACK_FILES[resolvedTier] || SMART_MC_OFFLINE_FALLBACK_FILES.manual;
   const candidateFiles = [...localFemaleFiles, ttsEndpoint, ...offlineFallbacks];
 
   // Safety timer agar status speaking & ducking selalu pulih tepat waktu
-  fallbackSpeechTimerRef = setTimeout(finishOnce, 12000);
+  fallbackSpeechTimerRef = setTimeout(finishOnce, 14000);
 
   const tryPlayCandidate = (index: number) => {
-    if (hasCompleted || index >= candidateFiles.length) {
+    if (hasCompleted || sessionId !== activePlaybackSessionId) return;
+
+    if (index >= candidateFiles.length) {
       try {
         audioFx.playSmartMc(resolvedTier);
       } catch {}
@@ -717,12 +753,7 @@ export function playSmartMcAudio(
     }
 
     const src = candidateFiles[index];
-    const isFinalOfflineStage = index >= localFemaleFiles.length + 1;
-    if (isFinalOfflineStage && index === localFemaleFiles.length + 1) {
-      try {
-        audioFx.playSmartMc(resolvedTier);
-      } catch {}
-    }
+    let attemptSettled = false;
 
     try {
       const audio = new Audio(src);
@@ -730,22 +761,38 @@ export function playSmartMcAudio(
       audio.volume = 1.0;
       activeMcAudioRef = audio;
 
-      audio.onended = () => {
-        finishOnce();
-      };
-
-      audio.onerror = () => {
+      const advanceToNext = () => {
+        if (attemptSettled || hasCompleted || sessionId !== activePlaybackSessionId) return;
+        attemptSettled = true;
+        try {
+          audio.onended = null;
+          audio.onerror = null;
+          audio.pause();
+          audio.src = '';
+        } catch {}
+        if (activeMcAudioRef === audio) {
+          activeMcAudioRef = null;
+        }
         tryPlayCandidate(index + 1);
       };
 
+      audio.onended = () => {
+        if (attemptSettled || hasCompleted || sessionId !== activePlaybackSessionId) return;
+        attemptSettled = true;
+        finishOnce();
+      };
+
+      audio.onerror = advanceToNext;
+
       const playPromise = audio.play();
       if (playPromise && typeof playPromise.catch === 'function') {
-        playPromise.catch(() => {
-          tryPlayCandidate(index + 1);
-        });
+        playPromise.catch(advanceToNext);
       }
     } catch {
-      tryPlayCandidate(index + 1);
+      if (!attemptSettled) {
+        attemptSettled = true;
+        tryPlayCandidate(index + 1);
+      }
     }
   };
 

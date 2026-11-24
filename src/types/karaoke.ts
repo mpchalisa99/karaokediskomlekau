@@ -215,7 +215,8 @@ export type WebSocketMessageType =
   | 'RTC_MIC_STATUS'
   | 'SUBMIT_JURY_SCORE'
   | 'SYNC_JURY_SCORES'
-  | 'TRIGGER_SMART_MC';
+  | 'TRIGGER_SMART_MC'
+  | 'SMART_MC_STATUS';
 
 export interface WebSocketMessage {
   type: WebSocketMessageType;
