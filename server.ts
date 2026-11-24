@@ -58,7 +58,7 @@ function getOrCreateRoom(roomId: string): RoomState {
       lastUpdated: Date.now(),
       lastSkipAt: 0,
       musicDelayMs: 70,
-      musicVolume: 85,
+      musicVolume: 100,
       isMuted: false,
     };
     rooms.set(cleanId, room);
@@ -260,6 +260,125 @@ async function startServer() {
     }
   });
 
+  // Indonesian Female Voice TTS Endpoint for Smart MC fallback (100% compatible with Samsung Tizen OS)
+  const splitTtsChunks = (text: string, maxLen = 180): string[] => {
+    const cleaned = text.replace(/\s+/g, ' ').trim();
+    if (!cleaned) return [];
+    if (cleaned.length <= maxLen) return [cleaned];
+
+    const chunks: string[] = [];
+    const sentences = cleaned.split(/(?<=[.!?,;:])\s+/);
+    let current = '';
+
+    for (const sentence of sentences) {
+      if (!sentence) continue;
+      if ((current + ' ' + sentence).trim().length <= maxLen) {
+        current = (current + ' ' + sentence).trim();
+      } else {
+        if (current) {
+          chunks.push(current);
+          current = '';
+        }
+        if (sentence.length <= maxLen) {
+          current = sentence;
+        } else {
+          const words = sentence.split(' ');
+          for (const w of words) {
+            if ((current + ' ' + w).trim().length <= maxLen) {
+              current = (current + ' ' + w).trim();
+            } else {
+              if (current) chunks.push(current);
+              current = w.slice(0, maxLen);
+            }
+          }
+        }
+      }
+    }
+    if (current) chunks.push(current);
+    return chunks.slice(0, 4);
+  };
+
+  app.get('/api/tts', async (req, res) => {
+    const rawText = String(req.query.text || req.query.q || 'Selamat bernyanyi di Karaoke Diskomlekau!').trim();
+    const tier = String(req.query.tier || 'manual').trim();
+    const chunks = splitTtsChunks(rawText, 180);
+
+    try {
+      const audioBuffers: Buffer[] = [];
+      for (const chunk of chunks) {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 5000);
+        try {
+          const ttsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&tl=id&client=tw-ob&q=${encodeURIComponent(chunk)}`;
+          const upstream = await fetch(ttsUrl, {
+            signal: controller.signal,
+            headers: {
+              'User-Agent':
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+              Referer: 'https://translate.google.com/',
+            },
+          });
+          if (upstream.ok) {
+            const arrBuf = await upstream.arrayBuffer();
+            if (arrBuf.byteLength > 256) {
+              audioBuffers.push(Buffer.from(arrBuf));
+            }
+          }
+        } finally {
+          clearTimeout(timer);
+        }
+      }
+
+      if (audioBuffers.length > 0) {
+        const combined = Buffer.concat(audioBuffers);
+        res.setHeader('Content-Type', 'audio/mpeg');
+        res.setHeader('Cache-Control', 'public, max-age=86400');
+        res.setHeader('Content-Length', String(combined.length));
+        return res.status(200).send(combined);
+      }
+    } catch (err) {
+      console.warn('[Server TTS] Upstream TTS unavailable, falling back to local MP3:', err);
+    }
+
+    const fallbackFile =
+      tier === 'high'
+        ? 'mc-high.mp3'
+        : tier === 'medium'
+        ? 'mc-medium.mp3'
+        : tier === 'low'
+        ? 'mc-low.mp3'
+        : 'mc-pantun.mp3';
+
+    const candidates = [
+      path.resolve(__dirname, 'public', 'sounds', fallbackFile),
+      path.resolve(__dirname, 'public', 'sounds', 'mc-pantun.mp3'),
+      path.resolve(__dirname, 'public', 'sounds', 'cheer.mp3'),
+    ];
+
+    for (const filePath of candidates) {
+      if (fs.existsSync(filePath)) {
+        res.setHeader('Content-Type', 'audio/mpeg');
+        res.setHeader('Cache-Control', 'public, max-age=3600');
+        return res.sendFile(filePath);
+      }
+    }
+
+    return res.status(404).json({ success: false, error: 'Audio TTS tidak tersedia' });
+  });
+
+  // Ensure missing local MP3 requests under /sounds/* return 404 immediately instead of SPA HTML
+  app.get('/sounds/:fileName', (req, res, next) => {
+    const safeName = path.basename(req.params.fileName || '');
+    const distSound = path.resolve(__dirname, 'dist', 'sounds', safeName);
+    const publicSound = path.resolve(__dirname, 'public', 'sounds', safeName);
+    if (fs.existsSync(distSound)) return res.sendFile(distSound);
+    if (fs.existsSync(publicSound)) return res.sendFile(publicSound);
+    if (safeName.endsWith('.mp3') || safeName.endsWith('.wav') || safeName.endsWith('.ogg')) {
+      return res.status(404).end();
+    }
+    next();
+  });
+
   // Server-side Gemini AI song recommendations & military karaoke cheer
   app.post('/api/ai/cheer', async (req, res) => {
     try {
@@ -388,10 +507,11 @@ async function startServer() {
         isPlaying: room.isPlaying,
         queue: room.queue,
         musicDelayMs: room.musicDelayMs ?? 70,
-        musicVolume: room.musicVolume ?? 85,
+        musicVolume: room.musicVolume ?? 100,
         isMuted: room.isMuted ?? false,
         clientCount: room.clients.size,
         clients: getRoomClientSummaries(room),
+        juryVotes: Array.from(room.juryVotes.values()),
         lastUpdated: room.lastUpdated,
       },
     });
@@ -446,7 +566,7 @@ async function startServer() {
       type: 'SET_MUSIC_VOLUME',
       roomId: room.roomId,
       payload: {
-        volume: room.musicVolume ?? 85,
+        volume: room.musicVolume ?? 100,
         isMuted: room.isMuted ?? false,
         senderName: senderName || 'Prajurit (HP)',
       },
@@ -565,8 +685,9 @@ async function startServer() {
         isPlaying: room.isPlaying,
         queue: room.queue,
         musicDelayMs: room.musicDelayMs ?? 70,
-        musicVolume: room.musicVolume ?? 85,
+        musicVolume: room.musicVolume ?? 100,
         isMuted: room.isMuted ?? false,
+        juryVotes: Array.from(room.juryVotes.values()),
         lastUpdated: room.lastUpdated,
       },
     });
@@ -1059,14 +1180,23 @@ async function startServer() {
     const requestedClientId = (url.searchParams.get('clientId') || '').trim();
     const clientId = requestedClientId || `ws-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
 
+    const existingClient = room.clients.get(clientId);
+    if (existingClient && existingClient.ws && existingClient.ws !== ws) {
+      try {
+        existingClient.ws.terminate();
+      } catch {}
+    }
+
     const clientRecord: ConnectedClient = {
       id: clientId,
       customId: requestedClientId || undefined,
       name: singerName,
       role,
       ws,
-      connectedAt: Date.now(),
+      connectedAt: existingClient?.connectedAt || Date.now(),
+      lastSeen: Date.now(),
     };
+    (ws as any).isAlive = true;
     room.clients.set(clientId, clientRecord);
 
     // Send initial snapshot to newly connected device (including detected local hotspot/LAN IPs for zero-delay WebRTC)
@@ -1081,7 +1211,7 @@ async function startServer() {
           isPlaying: room.isPlaying,
           queue: room.queue,
           musicDelayMs: room.musicDelayMs ?? 70,
-          musicVolume: room.musicVolume ?? 85,
+          musicVolume: room.musicVolume ?? 100,
           isMuted: room.isMuted ?? false,
           clientCount: room.clients.size,
           clients: getRoomClientSummaries(room),
@@ -1105,8 +1235,15 @@ async function startServer() {
       timestamp: Date.now(),
     });
 
+    ws.on('pong', () => {
+      (ws as any).isAlive = true;
+      clientRecord.lastSeen = Date.now();
+    });
+
     ws.on('message', (data) => {
       try {
+        (ws as any).isAlive = true;
+        clientRecord.lastSeen = Date.now();
         const msg = JSON.parse(data.toString());
         if (!msg || !msg.type) return;
 
@@ -1143,7 +1280,7 @@ async function startServer() {
                     isPlaying: room.isPlaying,
                     queue: room.queue,
                     musicDelayMs: room.musicDelayMs,
-                    musicVolume: room.musicVolume ?? 85,
+                    musicVolume: room.musicVolume ?? 100,
                     isMuted: room.isMuted ?? false,
                     clientCount: room.clients.size,
                   },
@@ -1364,7 +1501,7 @@ async function startServer() {
               type: 'SET_MUSIC_VOLUME',
               roomId: room.roomId,
               payload: {
-                volume: room.musicVolume ?? 85,
+                volume: room.musicVolume ?? 100,
                 isMuted: room.isMuted ?? false,
                 senderName: customSender || singerName,
               },
@@ -1625,26 +1762,29 @@ async function startServer() {
     });
 
     ws.on('close', () => {
-      room.clients.delete(clientId);
-      broadcastToRoom(room, {
-        type: 'RTC_MIC_STATUS',
-        roomId: room.roomId,
-        payload: {
-          senderId: clientId,
-          senderName: singerName,
-          isMicOn: false,
-        },
-        timestamp: Date.now(),
-      });
-      broadcastToRoom(room, {
-        type: 'CLIENT_COUNT_UPDATE',
-        roomId: room.roomId,
-        payload: {
-          clientCount: room.clients.size,
-          clients: getRoomClientSummaries(room),
-        },
-        timestamp: Date.now(),
-      });
+      const current = room.clients.get(clientId);
+      if (current && current.ws === ws) {
+        room.clients.delete(clientId);
+        broadcastToRoom(room, {
+          type: 'RTC_MIC_STATUS',
+          roomId: room.roomId,
+          payload: {
+            senderId: clientId,
+            senderName: singerName,
+            isMicOn: false,
+          },
+          timestamp: Date.now(),
+        });
+        broadcastToRoom(room, {
+          type: 'CLIENT_COUNT_UPDATE',
+          roomId: room.roomId,
+          payload: {
+            clientCount: room.clients.size,
+            clients: getRoomClientSummaries(room),
+          },
+          timestamp: Date.now(),
+        });
+      }
     });
 
     ws.on('error', (err) => {
@@ -1652,11 +1792,19 @@ async function startServer() {
     });
   });
 
-  // Server-side active heartbeat every 4.5s to prevent proxy/NAT timeouts & keep connections rock solid
+  // Server-side active heartbeat every 4.5s to prevent proxy/NAT timeouts & prune dead sockets
   setInterval(() => {
-    wss.clients.forEach((client) => {
+    wss.clients.forEach((client: any) => {
+      if (client.isAlive === false) {
+        try {
+          client.terminate();
+        } catch {}
+        return;
+      }
+      client.isAlive = false;
       if (client.readyState === WebSocket.OPEN) {
         try {
+          client.ping();
           client.send(JSON.stringify({ type: 'HEARTBEAT', timestamp: Date.now() }));
         } catch {}
       }

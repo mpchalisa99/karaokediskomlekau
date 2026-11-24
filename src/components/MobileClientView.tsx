@@ -31,8 +31,8 @@ import {
   Trophy,
   Award,
 } from 'lucide-react';
-import { Song, QueueItem, SuffixFilter, getScoreQuote, SmartMcAnnouncement } from '../types/karaoke';
-import { CURATED_LIBRARY, CATEGORY_PRESETS, extractYoutubeVideoId, fetchOEmbedInfo } from '../services/youtube';
+import { Song, QueueItem, SuffixFilter, getScoreQuote, SmartMcAnnouncement, ConnectionStatus } from '../types/karaoke';
+import { CURATED_LIBRARY, CATEGORY_PRESETS, extractYoutubeVideoId, fetchOEmbedInfo, getHitsIndonesiaSongs, refreshIndonesianTrendingHits } from '../services/youtube';
 import { generateSmartMcAnnouncement } from '../services/smartMc';
 import { PWAInstallButton } from './PWAInstallButton';
 import { useWebRTCMicrophone } from '../hooks/useWebRTCMicrophone';
@@ -88,8 +88,11 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
 
   // Connection State
   const [isConnected, setIsConnected] = useState<boolean>(true);
+  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('reconnecting');
   const [clientCount, setClientCount] = useState<number>(1);
   const wsRef = useRef<WebSocket | null>(null);
+  const pendingClientMessagesRef = useRef<{ type: string; payload: any; timestamp: number }[]>([]);
+  const lastWsPongRef = useRef<number>(Date.now());
   const lastClientSkipRef = useRef<number>(0);
 
   // Master Room State (Synchronized with TV & Tablet)
@@ -114,10 +117,15 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
     setJuryVotersList([]);
   }, [currentSong?.id]);
 
-  // Search State
+  // Search State & Dynamic Hits Indonesia Trends
+  const [hitsIndoSongs, setHitsIndoSongs] = useState<Song[]>(() => getHitsIndonesiaSongs());
+  const [isRefreshingHits, setIsRefreshingHits] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [suffixFilter, setSuffixFilter] = useState<SuffixFilter>('karaoke');
-  const [searchResults, setSearchResults] = useState<Song[]>(() => CURATED_LIBRARY['hits-indonesia'] || CURATED_LIBRARY['slow-rock']);
+  const [searchResults, setSearchResults] = useState<Song[]>(() => {
+    const hits = getHitsIndonesiaSongs();
+    return hits.length > 0 ? hits : CURATED_LIBRARY['slow-rock'];
+  });
   const [activeSearchCategory, setActiveSearchCategory] = useState<string | null>('hits-indonesia');
   const [isSearching, setIsSearching] = useState<boolean>(false);
   const [searchError, setSearchError] = useState<string | null>(null);
@@ -170,8 +178,8 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
   // TV Music Sync Delay Buffer (0ms - 250ms, default 70ms)
   const [tvMusicDelay, setTvMusicDelay] = useState<number>(70);
 
-  // TV Music Volume State (0% - 100%, default 85%) & Mute State
-  const [musicVolume, setMusicVolume] = useState<number>(85);
+  // TV Music Volume State (0% - 100%, default 100% agar lantang & jernih) & Mute State
+  const [musicVolume, setMusicVolume] = useState<number>(100);
   const [isMusicMuted, setIsMusicMuted] = useState<boolean>(false);
 
   // Local Network IP detection for Hotspot / LAN
@@ -190,24 +198,56 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
     return false;
   }, []);
 
+  // Reliable WebSocket dispatch with retry queue when temporarily disconnected
+  const sendWsReliable = useCallback(
+    (type: string, payload: any): boolean => {
+      const msg = { type, roomId, payload, timestamp: Date.now() };
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        try {
+          wsRef.current.send(JSON.stringify(msg));
+          return true;
+        } catch {}
+      }
+      if (type !== 'PING' && type !== 'PONG' && !type.startsWith('RTC_')) {
+        const q = pendingClientMessagesRef.current;
+        q.push({ type, payload, timestamp: Date.now() });
+        if (q.length > 25) q.shift();
+      }
+      return false;
+    },
+    [roomId]
+  );
+
+  // Refresh dynamic Indonesian YouTube trends (with localStorage cache)
+  const handleRefreshHits = useCallback(async () => {
+    if (isRefreshingHits) return;
+    setIsRefreshingHits(true);
+    try {
+      const result = await refreshIndonesianTrendingHits();
+      const updated = result.songs;
+      setHitsIndoSongs(updated);
+      if (activeSearchCategory === 'hits-indonesia' && !searchQuery.trim()) {
+        setSearchResults(updated);
+      }
+      showToast(
+        result.fromOnline
+          ? `🔥 Tren Hits Indonesia diperbarui dari YouTube (${updated.length} lagu)!`
+          : `✅ Daftar Hits Indonesia tersimpan (${updated.length} lagu).`
+      );
+    } catch {
+      showToast('⚠️ Gagal memuat tren terbaru, memakai daftar tersimpan.');
+    } finally {
+      setIsRefreshingHits(false);
+    }
+  }, [isRefreshingHits, activeSearchCategory, searchQuery, showToast]);
+
   const handleSetTvMusicDelay = useCallback(
     (val: number) => {
       const clamped = Math.max(0, Math.min(250, Math.round(val)));
       setTvMusicDelay(clamped);
 
-      // 1. WebSocket
-      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-        try {
-          wsRef.current.send(
-            JSON.stringify({
-              type: 'MUSIC_SYNC_DELAY',
-              roomId,
-              payload: { delayMs: clamped },
-              timestamp: Date.now(),
-            })
-          );
-        } catch {}
-      }
+      // 1. WebSocket (with retry queue)
+      sendWsReliable('MUSIC_SYNC_DELAY', { delayMs: clamped });
 
       // 2. PeerJS DataConnection
       sendPeerMessage({
@@ -224,7 +264,7 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
 
       showToast(`⚡ Sinkron Musik TV: ${clamped}ms`);
     },
-    [roomId, sendPeerMessage, showToast]
+    [roomId, sendWsReliable, sendPeerMessage, showToast]
   );
 
   // Control Music Volume on Master TV from Mobile Client (HP)
@@ -237,23 +277,12 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
         setIsMusicMuted(effectiveMute);
       }
 
-      // 1. WebSocket Signaling
-      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-        try {
-          wsRef.current.send(
-            JSON.stringify({
-              type: 'SET_MUSIC_VOLUME',
-              roomId,
-              payload: {
-                volume: clamped,
-                isMuted: effectiveMute,
-                senderName: singerName,
-              },
-              timestamp: Date.now(),
-            })
-          );
-        } catch {}
-      }
+      // 1. WebSocket Signaling (with retry queue)
+      sendWsReliable('SET_MUSIC_VOLUME', {
+        volume: clamped,
+        isMuted: effectiveMute,
+        senderName: singerName,
+      });
 
       // 2. PeerJS DataConnection P2P
       sendPeerMessage({
@@ -282,7 +311,7 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
         showToast(`🎵 Volume Musik TV: ${clamped}%`);
       }
     },
-    [roomId, isMusicMuted, singerName, sendPeerMessage, showToast]
+    [roomId, isMusicMuted, singerName, sendWsReliable, sendPeerMessage, showToast]
   );
 
   const handleToggleMusicMute = useCallback(() => {
@@ -362,18 +391,30 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
         if (data.success && data.room) {
           lastSyncTime.current = Date.now();
           setIsConnected(true);
+          setConnectionStatus('connected');
           if (data.room.currentSong !== undefined) setCurrentSong(data.room.currentSong);
           if (typeof data.room.isPlaying === 'boolean') setIsPlaying(data.room.isPlaying);
           if (Array.isArray(data.room.queue)) setQueue(data.room.queue);
           if (typeof data.room.musicDelayMs === 'number') setTvMusicDelay(data.room.musicDelayMs);
           if (typeof data.room.musicVolume === 'number') setMusicVolume(data.room.musicVolume);
           if (typeof data.room.isMuted === 'boolean') setIsMusicMuted(data.room.isMuted);
+          if (Array.isArray(data.room.juryVotes)) {
+            setJuryVotersList(data.room.juryVotes.map((v: any) => ({ juryName: v.juryName, score: v.score })));
+          }
           if (data.clientCount !== undefined) setClientCount(data.clientCount);
         }
       }
-    } catch (err) {
-      if (Date.now() - lastSyncTime.current > 7000) {
+    } catch {
+      const elapsed = Date.now() - lastSyncTime.current;
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) {
         setIsConnected(false);
+        setConnectionStatus('disconnected');
+      } else if (elapsed > 15000) {
+        setIsConnected(false);
+        setConnectionStatus('disconnected');
+      } else if (elapsed > 7000) {
+        setIsConnected(false);
+        setConnectionStatus('reconnecting');
       }
     }
   }, [roomId, singerName, clientId]);
@@ -797,18 +838,20 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
     }
   }, [isMicStreaming, peerMicStreaming, toggleMicMute, togglePeerMicMute]);
 
-  // Connect WebSocket & fallback SSE
+  // Connect WebSocket & fallback SSE with exponential backoff, heartbeat & retry queue
   useEffect(() => {
     fetchRoomState();
 
     let socket: WebSocket | null = null;
     let sseSource: EventSource | null = null;
     let reconnectTimeout: any = null;
+    let isUnmounted = false;
 
     let retryAttempt = 0;
     let pingInterval: any = null;
 
     const connectWebSocket = () => {
+      if (isUnmounted) return;
       if (reconnectTimeout) {
         clearTimeout(reconnectTimeout);
         reconnectTimeout = null;
@@ -825,22 +868,57 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
         socket = new WebSocket(wsUrl);
         wsRef.current = socket;
         setWsReadyState(WebSocket.CONNECTING);
+        if (Date.now() - lastSyncTime.current > 7000) {
+          setConnectionStatus('reconnecting');
+        }
 
         socket.onopen = () => {
+          if (isUnmounted) return;
           retryAttempt = 0;
           lastSyncTime.current = Date.now();
+          lastWsPongRef.current = Date.now();
           setIsConnected(true);
+          setConnectionStatus('connected');
           setWsReadyState(WebSocket.OPEN);
 
-          // Heartbeat ping every 3 seconds to maintain rock-solid connection
+          // Flush queued messages that were sent while temporarily disconnected
+          if (pendingClientMessagesRef.current.length > 0) {
+            const queued = [...pendingClientMessagesRef.current];
+            pendingClientMessagesRef.current = [];
+            queued.forEach((item) => {
+              try {
+                socket?.send(
+                  JSON.stringify({
+                    type: item.type,
+                    roomId,
+                    payload: item.payload,
+                    timestamp: Date.now(),
+                  })
+                );
+              } catch {
+                pendingClientMessagesRef.current.push(item);
+              }
+            });
+          }
+
+          // Full room state sync upon opening/reconnecting
+          fetchRoomState();
+
+          // Heartbeat ping + staleness watchdog every 4 seconds
           if (pingInterval) clearInterval(pingInterval);
           pingInterval = setInterval(() => {
             if (socket && socket.readyState === WebSocket.OPEN) {
+              if (Date.now() - lastWsPongRef.current > 15000) {
+                try {
+                  socket.close();
+                } catch {}
+                return;
+              }
               try {
                 socket.send(JSON.stringify({ type: 'PING', roomId, timestamp: Date.now() }));
               } catch {}
             }
-          }, 3000);
+          }, 4000);
         };
 
         socket.onmessage = (event) => {
@@ -849,9 +927,14 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
             if (!data || !data.type) return;
 
             lastSyncTime.current = Date.now();
+            lastWsPongRef.current = Date.now();
             setIsConnected(true);
+            setConnectionStatus('connected');
 
             switch (data.type) {
+              case 'PONG':
+                break;
+
               case 'HEARTBEAT': {
                 try {
                   socket?.send(JSON.stringify({ type: 'PONG', roomId, timestamp: Date.now() }));
@@ -869,6 +952,9 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
                   if (typeof data.payload.musicDelayMs === 'number') setTvMusicDelay(data.payload.musicDelayMs);
                   if (typeof data.payload.musicVolume === 'number') setMusicVolume(data.payload.musicVolume);
                   if (typeof data.payload.isMuted === 'boolean') setIsMusicMuted(data.payload.isMuted);
+                  if (Array.isArray(data.payload.juryVotes)) {
+                    setJuryVotersList(data.payload.juryVotes.map((v: any) => ({ juryName: v.juryName, score: v.score })));
+                  }
                   if (Array.isArray(data.payload.localIps) && data.payload.localIps.length > 0) {
                     setDetectedLocalIps(data.payload.localIps);
                   }
@@ -974,17 +1060,22 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
         };
 
         socket.onclose = () => {
+          if (isUnmounted) return;
           setWsReadyState(WebSocket.CLOSED);
           if (pingInterval) {
             clearInterval(pingInterval);
             pingInterval = null;
           }
-          // Do not force isConnected to false if HTTP ping is still succeeding!
-          if (Date.now() - lastSyncTime.current > 7000) {
+          const isOffline = typeof navigator !== 'undefined' && navigator.onLine === false;
+          if (isOffline) {
             setIsConnected(false);
+            setConnectionStatus('disconnected');
+          } else if (Date.now() - lastSyncTime.current > 7000) {
+            setIsConnected(false);
+            setConnectionStatus('reconnecting');
           }
           retryAttempt++;
-          const delay = Math.min(800 * Math.pow(1.2, retryAttempt), 3000);
+          const delay = Math.min(1000 * Math.pow(1.5, retryAttempt), 15000);
           reconnectTimeout = setTimeout(connectWebSocket, delay);
         };
 
@@ -1001,9 +1092,11 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
     };
 
     triggerReconnectRef.current = () => {
+      retryAttempt = 0;
       if (!socket || socket.readyState !== WebSocket.OPEN) {
         connectWebSocket();
       }
+      fetchRoomState();
     };
 
     const connectSSE = () => {
@@ -1022,6 +1115,7 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
               if (Array.isArray(data.payload?.queue)) setQueue(data.payload.queue);
               if (data.payload?.clientCount) setClientCount(data.payload.clientCount);
               setIsConnected(true);
+              setConnectionStatus('connected');
             } else if (data.type === 'SYNC_QUEUE' && Array.isArray(data.payload?.queue)) {
               setQueue(data.payload.queue);
             } else if (data.type === 'PLAY_NOW' && data.payload?.song) {
@@ -1054,6 +1148,7 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
 
         sseSource.onerror = () => {
           setIsConnected(false);
+          setConnectionStatus('reconnecting');
         };
       } catch (e) {}
     };
@@ -1062,14 +1157,21 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
 
     // Fast auto-reconnect on screen unlock, app switch, or connection return
     const handlePhoneWake = () => {
+      retryAttempt = 0;
       if (!socket || socket.readyState !== WebSocket.OPEN) {
         connectWebSocket();
       }
       fetchRoomState();
     };
 
+    const handlePhoneOffline = () => {
+      setIsConnected(false);
+      setConnectionStatus('disconnected');
+    };
+
     document.addEventListener('visibilitychange', handlePhoneWake);
     window.addEventListener('online', handlePhoneWake);
+    window.addEventListener('offline', handlePhoneOffline);
     window.addEventListener('focus', handlePhoneWake);
     window.addEventListener('pageshow', handlePhoneWake);
 
@@ -1077,8 +1179,10 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
     const pollInterval = setInterval(fetchRoomState, 1500);
 
     return () => {
+      isUnmounted = true;
       document.removeEventListener('visibilitychange', handlePhoneWake);
       window.removeEventListener('online', handlePhoneWake);
+      window.removeEventListener('offline', handlePhoneOffline);
       window.removeEventListener('focus', handlePhoneWake);
       window.removeEventListener('pageshow', handlePhoneWake);
       triggerReconnectRef.current = null;
@@ -1088,7 +1192,7 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
       if (socket) socket.close();
       if (sseSource) sseSource.close();
     };
-  }, [roomId, singerName, fetchRoomState]);
+  }, [roomId, singerName, clientId, fetchRoomState]);
 
   // Execute YouTube Search
   const executeSearch = useCallback(
@@ -1149,24 +1253,24 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
           setSearchError(null);
         } else {
           const lower = q.toLowerCase();
-          const allCurated = Object.values(CURATED_LIBRARY).flat();
+          const allCurated = [...hitsIndoSongs, ...Object.entries(CURATED_LIBRARY).filter(([k]) => k !== 'hits-indonesia').flatMap(([, v]) => v)];
           const filtered = allCurated.filter(
             (s) => s.title.toLowerCase().includes(lower) || s.channelTitle.toLowerCase().includes(lower)
           );
-          const fallbackSongs = filtered.length > 0 ? filtered : (CURATED_LIBRARY['hits-indonesia'] || CURATED_LIBRARY['slow-rock']);
+          const fallbackSongs = filtered.length > 0 ? filtered : (hitsIndoSongs.length > 0 ? hitsIndoSongs : CURATED_LIBRARY['slow-rock']);
           setSearchResults(fallbackSongs);
           setSearchError('Pencarian kosong. Menampilkan koleksi lagu favorit.');
           showToast('⚠️ Lagu tidak ditemukan, menampilkan koleksi pilihan.');
         }
       } catch (err) {
         setSearchError('Koneksi pencarian lambat/gagal. Menampilkan koleksi lagu.');
-        setSearchResults(CURATED_LIBRARY['hits-indonesia'] || CURATED_LIBRARY['slow-rock']);
+        setSearchResults(hitsIndoSongs.length > 0 ? hitsIndoSongs : CURATED_LIBRARY['slow-rock']);
         showToast('⚠️ Waktu pencarian habis, menampilkan lagu favorit.');
       } finally {
         setIsSearching(false);
       }
     },
-    [searchQuery, suffixFilter, showToast]
+    [searchQuery, suffixFilter, hitsIndoSongs, showToast]
   );
 
   // Add song to queue
@@ -1199,20 +1303,9 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
       setIsPlaying(true);
     }
 
-    // 2. Multi-Channel Dispatch with identical canonical queueId
+    // 2. Multi-Channel Dispatch with identical canonical queueId (plus retry queue)
     sendPeerAction('ADD_QUEUE', { song, singerName, priority, queueId: canonicalQueueId, item: optimisticItem });
-
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      try {
-        wsRef.current.send(
-          JSON.stringify({
-            type: 'ADD_QUEUE_ITEM',
-            roomId,
-            payload: { song, singerName, priority, queueId: canonicalQueueId, item: optimisticItem },
-          })
-        );
-      } catch (e) {}
-    }
+    sendWsReliable('ADD_QUEUE_ITEM', { song, singerName, priority, queueId: canonicalQueueId, item: optimisticItem });
 
     try {
       const res = await fetch(`/api/room/${encodeURIComponent(roomId)}/queue`, {
@@ -1243,18 +1336,7 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
 
     // Multi-Channel Dispatch
     sendPeerAction('SELECT_SONG', song);
-
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      try {
-        wsRef.current.send(
-          JSON.stringify({
-            type: 'PLAY_NOW',
-            roomId,
-            payload: { song, singerName },
-          })
-        );
-      } catch (e) {}
-    }
+    sendWsReliable('PLAY_NOW', { song, singerName });
 
     try {
       await fetch(`/api/room/${encodeURIComponent(roomId)}/play-now`, {
@@ -1287,18 +1369,7 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
 
     // Multi-Channel Dispatch
     sendPeerAction('NEXT_SONG', { nextSong: nextSongItem, queueId: nextQueueId });
-
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      try {
-        wsRef.current.send(
-          JSON.stringify({
-            type: 'SKIP_NEXT',
-            roomId,
-            payload: { senderName: singerName, nextSong: nextSongItem, queueId: nextQueueId },
-          })
-        );
-      } catch (e) {}
-    }
+    sendWsReliable('SKIP_NEXT', { senderName: singerName, nextSong: nextSongItem, queueId: nextQueueId });
 
     try {
       const res = await fetch(`/api/room/${encodeURIComponent(roomId)}/skip`, {
@@ -1323,18 +1394,7 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
 
     // Multi-Channel Dispatch: { action: "PLAY" } / { action: "PAUSE" }
     sendPeerAction(nextState ? 'PLAY' : 'PAUSE');
-
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      try {
-        wsRef.current.send(
-          JSON.stringify({
-            type: 'TOGGLE_PAUSE',
-            roomId,
-            payload: { isPlaying: nextState, senderName: singerName },
-          })
-        );
-      } catch (e) {}
-    }
+    sendWsReliable('TOGGLE_PAUSE', { isPlaying: nextState, senderName: singerName });
 
     try {
       await fetch(`/api/room/${encodeURIComponent(roomId)}/toggle-pause`, {
@@ -1360,24 +1420,13 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
         songId: currentSong?.id,
       });
 
-      // 2. WebSocket Broadcast
-      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-        try {
-          wsRef.current.send(
-            JSON.stringify({
-              type: 'SUBMIT_JURY_SCORE',
-              roomId,
-              payload: {
-                score: finalVal,
-                juryName: jName,
-                songId: currentSong?.id,
-                clientId,
-              },
-              timestamp: Date.now(),
-            })
-          );
-        } catch {}
-      }
+      // 2. WebSocket Broadcast (with retry queue)
+      sendWsReliable('SUBMIT_JURY_SCORE', {
+        score: finalVal,
+        juryName: jName,
+        songId: currentSong?.id,
+        clientId,
+      });
 
       // 3. HTTP Fallback Endpoint
       try {
@@ -1409,7 +1458,7 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
 
       showToast(`⚖️ Nilai ${jName} (${finalVal}) terkirim ke dewan juri master!`);
     },
-    [juryScoreInput, singerName, sendPeerAction, currentSong, roomId, clientId, showToast]
+    [juryScoreInput, singerName, sendPeerAction, sendWsReliable, currentSong, roomId, clientId, showToast]
   );
 
   // Reorder queue: move song up or down
@@ -1423,16 +1472,9 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
     setQueue(newQueue);
 
     sendPeerAction('REORDER_QUEUE', { fromIndex, toIndex, queueId: moved.queueId });
+    const sentWs = sendWsReliable('MOVE_QUEUE_ITEM', { fromIndex, toIndex, queueId: moved.queueId, senderName: singerName });
 
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(
-        JSON.stringify({
-          type: 'MOVE_QUEUE_ITEM',
-          roomId,
-          payload: { fromIndex, toIndex, queueId: moved.queueId, senderName: singerName },
-        })
-      );
-    } else {
+    if (!sentWs) {
       try {
         const res = await fetch(`/api/room/${encodeURIComponent(roomId)}/reorder`, {
           method: 'POST',
@@ -1455,18 +1497,7 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
     setQueue((prev) => prev.filter((q) => q.queueId !== queueId));
 
     sendPeerAction('REMOVE_QUEUE', { queueId });
-
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      try {
-        wsRef.current.send(
-          JSON.stringify({
-            type: 'REMOVE_QUEUE_ITEM',
-            roomId,
-            payload: { queueId },
-          })
-        );
-      } catch (e) {}
-    }
+    sendWsReliable('REMOVE_QUEUE_ITEM', { queueId });
 
     try {
       const res = await fetch(`/api/room/${encodeURIComponent(roomId)}/remove`, {
@@ -1493,16 +1524,9 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
     }
 
     sendPeerAction('PLAY_SOUND_FX', { sound, senderName: singerName });
+    const sentWs = sendWsReliable('PLAY_SOUND_FX', { sound, senderName: singerName });
 
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(
-        JSON.stringify({
-          type: 'PLAY_SOUND_FX',
-          roomId,
-          payload: { sound, senderName: singerName },
-        })
-      );
-    } else {
+    if (!sentWs) {
       try {
         await fetch(`/api/room/${encodeURIComponent(roomId)}/reaction`, {
           method: 'POST',
@@ -1550,25 +1574,14 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
       isManual: true,
     });
 
-    // 2. WebSocket
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      try {
-        wsRef.current.send(
-          JSON.stringify({
-            type: 'TRIGGER_SMART_MC',
-            roomId,
-            payload: {
-              announcement,
-              singerName,
-              songTitle: currentSong?.title || 'Lagu Pilihan Prajurit',
-              score: effectiveScore,
-              isManual: true,
-            },
-            timestamp: Date.now(),
-          })
-        );
-      } catch {}
-    }
+    // 2. WebSocket (with retry queue)
+    sendWsReliable('TRIGGER_SMART_MC', {
+      announcement,
+      singerName,
+      songTitle: currentSong?.title || 'Lagu Pilihan Prajurit',
+      score: effectiveScore,
+      isManual: true,
+    });
 
     // 3. HTTP Fallback
     try {
@@ -1627,6 +1640,15 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
     setShowDirectInput(false);
   };
 
+  const effectiveConnectionStatus: ConnectionStatus =
+    typeof navigator !== 'undefined' && navigator.onLine === false
+      ? 'disconnected'
+      : isEmbedded || isConnected || wsReadyState === WebSocket.OPEN || peerConnectionState === 'connected'
+      ? 'connected'
+      : connectionStatus === 'disconnected' && peerConnectionState === 'disconnected'
+      ? 'disconnected'
+      : 'reconnecting';
+
   return (
     <div
       className={`text-slate-100 flex flex-col font-sans select-none ${
@@ -1664,29 +1686,41 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
               <div className="flex items-center gap-1.5 text-[11px] font-mono font-semibold">
                 <span
                   className={`h-2 w-2 rounded-full ${
-                    peerConnectionState === 'connected'
+                    effectiveConnectionStatus === 'connected'
                       ? 'bg-emerald-400 animate-pulse'
-                      : peerConnectionState === 'connecting'
+                      : effectiveConnectionStatus === 'reconnecting'
                       ? 'bg-amber-400 animate-pulse'
                       : 'bg-rose-500'
                   }`}
                 />
                 <span
                   className={
-                    peerConnectionState === 'connected'
+                    effectiveConnectionStatus === 'connected'
                       ? 'text-emerald-400'
-                      : peerConnectionState === 'connecting'
+                      : effectiveConnectionStatus === 'reconnecting'
                       ? 'text-amber-300'
                       : 'text-rose-400'
                   }
                 >
-                  {peerConnectionState === 'connected'
+                  {effectiveConnectionStatus === 'connected'
                     ? 'Terhubung ke TV'
-                    : peerConnectionState === 'connecting'
-                    ? 'Menghubungkan...'
+                    : effectiveConnectionStatus === 'reconnecting'
+                    ? 'Menyambung Ulang...'
                     : 'Koneksi Terputus'}
                 </span>
                 <span className="text-slate-400 text-[10px]">({roomId})</span>
+                {effectiveConnectionStatus !== 'connected' && (
+                  <button
+                    onClick={() => {
+                      handleRequestReconnect();
+                      connectToTvPeer();
+                    }}
+                    className="ml-1 rounded bg-sky-600/80 px-1.5 py-0.5 text-[9px] font-bold text-white active:scale-95"
+                    title="Sambung Ulang Sekarang"
+                  >
+                    ↻
+                  </button>
+                )}
               </div>
             </div>
           </div>
@@ -2082,31 +2116,44 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
 
             {/* List Pilihan Kategori Preset (Hits Indonesia Trending & Kategori Lain) */}
             <div className="space-y-1.5 pt-0.5">
-              <div className="flex items-center justify-between text-[11px] px-0.5">
+              <div className="flex items-center justify-between text-[11px] px-0.5 gap-2">
                 <span className="font-bold text-sky-300 flex items-center gap-1">
                   <Flame className="h-3 w-3 text-rose-400" />
                   <span>List Pilihan:</span>
                 </span>
-                {activeSearchCategory === 'hits-indonesia' && !searchQuery.trim() && (
-                  <span className="text-[10px] font-semibold text-rose-300 flex items-center gap-1">
-                    <span className="h-1.5 w-1.5 rounded-full bg-rose-400 animate-pulse" />
-                    <span>Hits YouTube Indonesia ({CURATED_LIBRARY['hits-indonesia']?.length || 0} Lagu)</span>
-                  </span>
-                )}
+                <div className="flex items-center gap-1.5">
+                  {activeSearchCategory === 'hits-indonesia' && !searchQuery.trim() && (
+                    <span className="text-[10px] font-semibold text-rose-300 flex items-center gap-1">
+                      <span className="h-1.5 w-1.5 rounded-full bg-rose-400 animate-pulse" />
+                      <span>Hits YouTube Indo ({hitsIndoSongs.length})</span>
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={handleRefreshHits}
+                    disabled={isRefreshingHits}
+                    className="inline-flex items-center gap-1 rounded-lg bg-rose-950/70 hover:bg-rose-900 border border-rose-500/50 px-2 py-0.5 text-[10px] font-bold text-rose-200 transition active:scale-95 disabled:opacity-50"
+                    title="Ambil lagu hits Indonesia tren terbaru dari YouTube"
+                  >
+                    <RefreshCw className={`h-2.5 w-2.5 ${isRefreshingHits ? 'animate-spin' : ''}`} />
+                    <span>{isRefreshingHits ? 'Memuat...' : 'Update Tren'}</span>
+                  </button>
+                </div>
               </div>
 
               <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-[11px] no-scrollbar">
                 {CATEGORY_PRESETS.map((preset) => {
                   const isSelected = activeSearchCategory === preset.id && !searchQuery.trim();
                   const isHitsIndo = preset.id === 'hits-indonesia';
-                  const count = (CURATED_LIBRARY[preset.id] || []).length;
+                  const categoryList = isHitsIndo ? hitsIndoSongs : (CURATED_LIBRARY[preset.id] || []);
+                  const count = categoryList.length;
                   return (
                     <button
                       key={preset.id}
                       onClick={() => {
                         setActiveSearchCategory(preset.id);
                         setSearchQuery('');
-                        setSearchResults(CURATED_LIBRARY[preset.id] || []);
+                        setSearchResults(categoryList);
                         showToast(`📂 Menampilkan list pilihan: ${preset.label}`);
                       }}
                       className={`rounded-xl px-2.5 py-1 whitespace-nowrap font-bold transition flex items-center gap-1 border active:scale-95 ${
@@ -2298,37 +2345,40 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
               {/* Status Badges */}
               <div className="mt-3 pt-3 border-t border-emerald-700/40 space-y-2 text-xs">
                 <div className="flex items-center justify-between">
-                  <span className="text-slate-300">Koneksi TV (P2P):</span>
+                  <span className="text-slate-300">Koneksi TV (P2P &amp; Sync):</span>
                   <div className="flex items-center gap-2">
                     <span className="font-mono font-bold flex items-center gap-1.5">
                       <span
                         className={`h-2 w-2 rounded-full ${
-                          (isConnected || wsReadyState === WebSocket.OPEN || isEmbedded || peerConnectionState === 'connected')
+                          effectiveConnectionStatus === 'connected'
                             ? 'bg-emerald-400'
-                            : peerConnectionState === 'connecting'
+                            : effectiveConnectionStatus === 'reconnecting'
                             ? 'bg-amber-400 animate-pulse'
                             : 'bg-rose-500'
                         }`}
                       />
                       <span
                         className={
-                          (isConnected || wsReadyState === WebSocket.OPEN || isEmbedded || peerConnectionState === 'connected')
+                          effectiveConnectionStatus === 'connected'
                             ? 'text-emerald-300'
-                            : peerConnectionState === 'connecting'
+                            : effectiveConnectionStatus === 'reconnecting'
                             ? 'text-amber-300'
                             : 'text-rose-300'
                         }
                       >
-                        {(isConnected || wsReadyState === WebSocket.OPEN || isEmbedded || peerConnectionState === 'connected')
+                        {effectiveConnectionStatus === 'connected'
                           ? `Terhubung ke TV (${roomId})`
-                          : peerConnectionState === 'connecting'
-                          ? 'Menghubungkan...'
+                          : effectiveConnectionStatus === 'reconnecting'
+                          ? 'Menyambung Ulang...'
                           : 'Koneksi Terputus'}
                       </span>
                     </span>
-                    {!(isConnected || wsReadyState === WebSocket.OPEN || isEmbedded || peerConnectionState === 'connected') && (
+                    {effectiveConnectionStatus !== 'connected' && (
                       <button
-                        onClick={connectToTvPeer}
+                        onClick={() => {
+                          handleRequestReconnect();
+                          connectToTvPeer();
+                        }}
                         className="px-2 py-0.5 rounded bg-sky-600/80 hover:bg-sky-500 text-white text-[10px] font-bold transition active:scale-95 flex items-center gap-1"
                       >
                         <RefreshCw className="h-2.5 w-2.5" />
@@ -2640,8 +2690,8 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
                       { val: 0, label: '0% Bisu', mute: true },
                       { val: 35, label: '35% Lirih', mute: false },
                       { val: 65, label: '65% Sedang', mute: false },
-                      { val: 85, label: '85% Standar ★', mute: false },
-                      { val: 100, label: '100% Maks', mute: false },
+                      { val: 85, label: '85% Lantang', mute: false },
+                      { val: 100, label: '100% Maks ★', mute: false },
                     ].map((p) => {
                       const isActive = !isMusicMuted && musicVolume === p.val && !p.mute;
                       const isMuteActive = isMusicMuted && p.mute;
@@ -3305,9 +3355,18 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
                     </p>
                   </div>
                 </div>
-                <span className="rounded-full bg-rose-500/20 border border-rose-400/40 px-2 py-0.5 text-[10px] font-bold text-rose-300 shrink-0">
-                  🔥 Hits YouTube Indo
-                </span>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <button
+                    type="button"
+                    onClick={handleRefreshHits}
+                    disabled={isRefreshingHits}
+                    className="flex items-center gap-1 rounded-full bg-rose-500/25 hover:bg-rose-500/40 border border-rose-400/50 px-2.5 py-1 text-[10px] font-bold text-rose-200 transition active:scale-95 disabled:opacity-50"
+                    title="Update daftar Hits YouTube Indonesia terbaru"
+                  >
+                    <RefreshCw className={`h-3 w-3 ${isRefreshingHits ? 'animate-spin' : ''}`} />
+                    <span>{isRefreshingHits ? 'Update...' : 'Update Tren'}</span>
+                  </button>
+                </div>
               </div>
 
               {/* In-Curated Quick Filter / Search */}
@@ -3336,7 +3395,7 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
               {CATEGORY_PRESETS.map((preset) => {
                 const isActive = curatedCategoryFilter === preset.id;
                 const isHitsIndo = preset.id === 'hits-indonesia';
-                const count = (CURATED_LIBRARY[preset.id] || []).length;
+                const count = (isHitsIndo ? hitsIndoSongs : (CURATED_LIBRARY[preset.id] || [])).length;
                 return (
                   <button
                     key={preset.id}
@@ -3380,7 +3439,9 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
 
             {/* If Single Category Selected */}
             {curatedCategoryFilter !== 'all' && (() => {
-              const categorySongs = CURATED_LIBRARY[curatedCategoryFilter] || [];
+              const categorySongs = curatedCategoryFilter === 'hits-indonesia'
+                ? hitsIndoSongs
+                : (CURATED_LIBRARY[curatedCategoryFilter] || []);
               const presetInfo = CATEGORY_PRESETS.find((p) => p.id === curatedCategoryFilter);
               const filterLower = curatedSearchQuery.trim().toLowerCase();
               const filteredSongs = filterLower
@@ -3478,7 +3539,8 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
             {/* If All Categories Selected */}
             {curatedCategoryFilter === 'all' && (
               <div className="space-y-4">
-                {Object.entries(CURATED_LIBRARY).map(([categoryKey, songs]) => {
+                {Object.entries(CURATED_LIBRARY).map(([categoryKey, rawSongs]) => {
+                  const songs = categoryKey === 'hits-indonesia' ? hitsIndoSongs : rawSongs;
                   const preset = CATEGORY_PRESETS.find((p) => p.id === categoryKey);
                   const isExpanded = expandedCategories[categoryKey] ?? (categoryKey === 'hits-indonesia');
                   const filterLower = curatedSearchQuery.trim().toLowerCase();
@@ -3711,7 +3773,7 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
                 {/* Quote Penilaian Sesuai Rentang Skor (0 s.d 100) */}
                 <div className="pt-1 w-full text-center">
                   <span className="inline-flex items-center justify-center gap-1.5 px-4 py-1.5 rounded-xl text-xs sm:text-sm font-black bg-amber-500/20 text-amber-200 border border-amber-400/70 shadow-lg shadow-amber-950/60">
-                    &ldquo;{getScoreQuote(juryScoreInput)}&rdquo;
+                    &ldquo;{getScoreQuote(juryScoreInput, currentSong?.id ? `${currentSong.id}-${juryScoreInput}` : juryScoreInput)}&rdquo;
                   </span>
                 </div>
               </div>
@@ -3814,7 +3876,7 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
 
                   <div className="rounded-xl bg-amber-500/20 border border-amber-400/70 px-3 py-2 text-center">
                     <p className="text-sm sm:text-base font-black text-amber-200 uppercase tracking-wide">
-                      &ldquo;{getScoreQuote(avgJury)}&rdquo;
+                      &ldquo;{getScoreQuote(avgJury, currentSong?.id ? `${currentSong.id}-avg-${avgJury}` : avgJury)}&rdquo;
                     </p>
                   </div>
 

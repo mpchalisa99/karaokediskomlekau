@@ -5,7 +5,7 @@ export const CATEGORY_PRESETS: CategoryPreset[] = [
     id: 'hits-indonesia',
     label: 'Favorit Hits Indonesia',
     query: 'Lagu Karaoke Hit Indonesia Populer',
-    description: 'Bernadya, Sal Priadi, Mahalini, Tulus, Judika, Dewa 19, Sheila on 7, Naff, Cakra Khan',
+    description: 'Tren YouTube Indo: Bernadya, Sal Priadi, Mahalini, Tulus, Juicy Luicy, Denny Caknan, Dewa 19, Sheila On 7, Naff',
     iconName: 'Flame',
     badgeColor: 'from-rose-500 via-amber-500 to-red-600',
   },
@@ -70,7 +70,7 @@ export const CATEGORY_PRESETS: CategoryPreset[] = [
 // Curated high quality karaoke video IDs for instant play & fallback
 export const CURATED_LIBRARY: Record<string, Song[]> = {
   'hits-indonesia': [
-    // === TRENDING & SERING DINYANYIKAN DI YOUTUBE INDONESIA ===
+    // === 1. POP & BALADA VIRAL / TREN YOUTUBE INDONESIA ===
     {
       id: 'tAuZPYrbC1M',
       title: 'Bernadya – Satu Bulan (Karaoke Version)',
@@ -183,6 +183,7 @@ export const CURATED_LIBRARY: Record<string, Song[]> = {
       duration: '3:20',
       isCurated: true,
     },
+    // === 2. DANGDUT & KOPLO POPULER ===
     {
       id: '3FtDDG054mQ',
       title: 'Guyon Waton x Denny Caknan - Sanes (Karaoke Lirik)',
@@ -199,6 +200,47 @@ export const CURATED_LIBRARY: Record<string, Song[]> = {
       duration: '5:02',
       isCurated: true,
     },
+    {
+      id: 'YzM4GDKZaM4',
+      title: 'Denny Caknan - Kartonyono Medot Janji (Karaoke)',
+      channelTitle: 'GMusic Entertainment',
+      thumbnailUrl: 'https://img.youtube.com/vi/YzM4GDKZaM4/hqdefault.jpg',
+      duration: '4:40',
+      isCurated: true,
+    },
+    {
+      id: 'YxNCrxWzqys',
+      title: 'Denny Caknan - Los Dol (Karaoke)',
+      channelTitle: 'GMusic Entertainment',
+      thumbnailUrl: 'https://img.youtube.com/vi/YxNCrxWzqys/hqdefault.jpg',
+      duration: '4:15',
+      isCurated: true,
+    },
+    {
+      id: '81wbexmUVls',
+      title: 'Via Vallen - Sayang KOPLO (Karaoke)',
+      channelTitle: 'GMusic Entertainment',
+      thumbnailUrl: 'https://img.youtube.com/vi/81wbexmUVls/hqdefault.jpg',
+      duration: '4:35',
+      isCurated: true,
+    },
+    {
+      id: 'rMJyjdQcUFc',
+      title: 'Didi Kempot - Pamer Bojo (Karaoke Audio HQ)',
+      channelTitle: 'Rosmeiga Music Official',
+      thumbnailUrl: 'https://img.youtube.com/vi/rMJyjdQcUFc/hqdefault.jpg',
+      duration: '5:37',
+      isCurated: true,
+    },
+    {
+      id: '0rsErjsUYVk',
+      title: 'Didi Kempot - Banyu Langit (Karaoke Koplo)',
+      channelTitle: 'Rosmeiga Music Official',
+      thumbnailUrl: 'https://img.youtube.com/vi/0rsErjsUYVk/hqdefault.jpg',
+      duration: '5:00',
+      isCurated: true,
+    },
+    // === 3. BAND & POP LINTAS GENERASI INDONESIA ===
     {
       id: 'auzlkVQDaLo',
       title: 'Virgoun - Surat Cinta Untuk Starla (Karaoke Version)',
@@ -303,7 +345,6 @@ export const CURATED_LIBRARY: Record<string, Song[]> = {
       duration: '5:10',
       isCurated: true,
     },
-    // === POP & NOSTALGIA HITS INDONESIA ===
     {
       id: 'BnlzOzdP8Is',
       title: 'Naff - Kenanglah Aku (Karaoke Version)',
@@ -430,6 +471,14 @@ export const CURATED_LIBRARY: Record<string, Song[]> = {
       channelTitle: 'Capleo Music',
       thumbnailUrl: 'https://img.youtube.com/vi/IUfZaqPqVPg/hqdefault.jpg',
       duration: '3:23',
+      isCurated: true,
+    },
+    {
+      id: 'TTy8adFm0aQ',
+      title: 'Padi - Menanti Sebuah Jawaban (Karaoke HQ Audio)',
+      channelTitle: 'Replay Karaoke',
+      thumbnailUrl: 'https://img.youtube.com/vi/TTy8adFm0aQ/hqdefault.jpg',
+      duration: '4:35',
       isCurated: true,
     },
   ],
@@ -801,6 +850,130 @@ async function searchViaInvidious(query: string): Promise<Song[]> {
   return [];
 }
 
+export const HITS_INDO_CACHE_KEY = 'karaoke_hits_indonesia_cache_v1';
+
+interface CachedHitsPayload {
+  songs: Song[];
+  updatedAt: number;
+}
+
+function mergeUniqueSongs(primary: Song[], secondary: Song[]): Song[] {
+  const seen = new Set<string>();
+  const merged: Song[] = [];
+  for (const s of [...primary, ...secondary]) {
+    if (!s?.id || seen.has(s.id)) continue;
+    seen.add(s.id);
+    merged.push(s);
+  }
+  return merged;
+}
+
+/**
+ * Ambil daftar Favorit Hits Indonesia dari localStorage cache (jika ada) yang digabung dengan koleksi terkurasi
+ */
+export function getHitsIndonesiaSongs(): Song[] {
+  const curated = CURATED_LIBRARY['hits-indonesia'] || [];
+  if (typeof window === 'undefined') return curated;
+  try {
+    const raw = localStorage.getItem(HITS_INDO_CACHE_KEY);
+    if (!raw) return curated;
+    const parsed = JSON.parse(raw) as CachedHitsPayload;
+    if (Array.isArray(parsed?.songs) && parsed.songs.length > 0) {
+      return mergeUniqueSongs(parsed.songs, curated);
+    }
+  } catch {}
+  return curated;
+}
+
+export function getHitsIndonesiaLastUpdated(): number | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = localStorage.getItem(HITS_INDO_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as CachedHitsPayload;
+    return typeof parsed?.updatedAt === 'number' ? parsed.updatedAt : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Segarkan daftar Favorit Hits Indonesia dengan tren musik YouTube terkini (/api/search + Invidious fallback)
+ * lalu simpan hasilnya ke localStorage agar tetap cepat diakses dan tidak kosong saat koneksi lambat.
+ */
+export async function refreshIndonesianTrendingHits(): Promise<{
+  songs: Song[];
+  updatedAt: number;
+  fromOnline: boolean;
+}> {
+  const curated = CURATED_LIBRARY['hits-indonesia'] || [];
+  const queries = [
+    'lagu hits indonesia viral terbaru karaoke 2025',
+    'trending musik karaoke indonesia populer',
+  ];
+
+  let fetchedOnline: Song[] = [];
+
+  for (const q of queries) {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
+      const resp = await fetch(`/api/search?q=${encodeURIComponent(q)}`, {
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+
+      if (resp.ok) {
+        const data = await resp.json();
+        if (data.success && Array.isArray(data.songs) && data.songs.length > 0) {
+          const mapped: Song[] = data.songs.map((v: any) => ({
+            id: v.id,
+            title: decodeHtmlEntities(v.title || ''),
+            channelTitle: v.channelTitle || 'YouTube Tren Indo',
+            thumbnailUrl: v.thumbnailUrl || `https://img.youtube.com/vi/${v.id}/hqdefault.jpg`,
+            duration: v.duration || '',
+            publishedAt: v.publishedAt,
+            isCurated: false,
+          }));
+          fetchedOnline = mergeUniqueSongs(fetchedOnline, mapped);
+        }
+      }
+    } catch {
+      // Lanjutkan ke query atau mirror berikutnya
+    }
+  }
+
+  if (fetchedOnline.length === 0) {
+    try {
+      const inv = await searchViaInvidious('lagu hits indonesia viral terbaru karaoke');
+      if (inv.length > 0) {
+        fetchedOnline = inv;
+      }
+    } catch {}
+  }
+
+  const now = Date.now();
+  const combined = fetchedOnline.length > 0
+    ? mergeUniqueSongs(fetchedOnline.slice(0, 18), curated)
+    : getHitsIndonesiaSongs();
+
+  if (typeof window !== 'undefined' && combined.length > 0) {
+    try {
+      const payload: CachedHitsPayload = {
+        songs: combined,
+        updatedAt: now,
+      };
+      localStorage.setItem(HITS_INDO_CACHE_KEY, JSON.stringify(payload));
+    } catch {}
+  }
+
+  return {
+    songs: combined,
+    updatedAt: now,
+    fromOnline: fetchedOnline.length > 0,
+  };
+}
+
 /**
  * Primary YouTube search function with server-side proxy
  */
@@ -810,7 +983,7 @@ export async function searchYouTube(
 ): Promise<Song[]> {
   const trimmed = query.trim();
   if (!trimmed) {
-    return CURATED_LIBRARY['hits-indonesia'] || [];
+    return getHitsIndonesiaSongs();
   }
 
   // 1. Direct link detection
@@ -868,15 +1041,20 @@ export async function searchYouTube(
     // continue to fallback
   }
 
-  // 4. Return curated library matching keywords or hits-indonesia
+  // 4. Return curated library matching keywords or cached hits-indonesia
   const lowerQ = trimmed.toLowerCase();
-  for (const [catKey, songs] of Object.entries(CURATED_LIBRARY)) {
+  const cachedHits = getHitsIndonesiaSongs();
+  const matchedCached = cachedHits.filter((s) => s.title.toLowerCase().includes(lowerQ));
+  if (matchedCached.length > 0) {
+    return matchedCached;
+  }
+  for (const songs of Object.values(CURATED_LIBRARY)) {
     if (songs.some((s) => s.title.toLowerCase().includes(lowerQ))) {
       return songs;
     }
   }
 
-  return CURATED_LIBRARY['hits-indonesia'] || [];
+  return cachedHits;
 }
 
 export interface SearchResultWrapper {
@@ -892,8 +1070,15 @@ export async function searchKaraokeSongs(
 ): Promise<SearchResultWrapper> {
   const trimmed = (query || '').trim();
 
+  if (categoryId === 'hits-indonesia') {
+    return {
+      songs: getHitsIndonesiaSongs(),
+      isCuratedFallback: true,
+    };
+  }
+
   // If specific category selected with matching curated songs
-  if (categoryId && (!trimmed || categoryId === 'hits-indonesia' || categoryId === 'naff-cakra' || categoryId === 'kerispatih-adaband' || categoryId === 'java-jive-nostalgia')) {
+  if (categoryId && (!trimmed || categoryId === 'naff-cakra' || categoryId === 'kerispatih-adaband' || categoryId === 'java-jive-nostalgia')) {
     const curated = CURATED_LIBRARY[categoryId];
     if (curated && curated.length > 0) {
       return {
@@ -904,7 +1089,7 @@ export async function searchKaraokeSongs(
   }
 
   if (!trimmed) {
-    const defaultSongs = (categoryId && CURATED_LIBRARY[categoryId]) || CURATED_LIBRARY['hits-indonesia'] || [];
+    const defaultSongs = (categoryId && CURATED_LIBRARY[categoryId]) || getHitsIndonesiaSongs();
     return {
       songs: defaultSongs,
       isCuratedFallback: true,
@@ -921,14 +1106,14 @@ export async function searchKaraokeSongs(
     }
   } catch (err: any) {
     return {
-      songs: CURATED_LIBRARY['hits-indonesia'] || [],
+      songs: getHitsIndonesiaSongs(),
       isCuratedFallback: true,
       error: 'Pencarian online dialihkan ke koleksi lagu favorit.',
     };
   }
 
   return {
-    songs: CURATED_LIBRARY['hits-indonesia'] || [],
+    songs: getHitsIndonesiaSongs(),
     isCuratedFallback: true,
   };
 }

@@ -41,7 +41,7 @@ export const SongScoreModal: React.FC = () => {
   const sumScore = votes.reduce((acc, v) => acc + v.score, 0);
   const avgScore = Math.round(sumScore / votes.length);
   const scoreExpression = votes.map((v) => v.score).join('+');
-  const scoreQuote = getScoreQuote(avgScore);
+  const scoreQuote = getScoreQuote(avgScore, currentScoreData.evaluatedAt);
 
   return (
     <aside

@@ -1,9 +1,9 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import confetti from 'canvas-confetti';
-import { Song, QueueItem, SuffixFilter, WebSocketMessage, RemoteClientInfo, RemoteNotification, SongScoreData, ScreenReaction, SoundFxType, JuryVote, JuryScoreSummary, getScoreQuote, SmartMcAnnouncement, SmartMcTier } from '../types/karaoke';
-import { searchKaraokeSongs, CURATED_LIBRARY, CATEGORY_PRESETS, extractYoutubeVideoId, fetchOEmbedInfo } from '../services/youtube';
+import { Song, QueueItem, SuffixFilter, WebSocketMessage, RemoteClientInfo, RemoteNotification, SongScoreData, ScreenReaction, SoundFxType, JuryVote, JuryScoreSummary, getScoreQuote, SmartMcAnnouncement, SmartMcTier, ConnectionStatus } from '../types/karaoke';
+import { searchKaraokeSongs, CURATED_LIBRARY, CATEGORY_PRESETS, extractYoutubeVideoId, fetchOEmbedInfo, getHitsIndonesiaSongs, getHitsIndonesiaLastUpdated, refreshIndonesianTrendingHits } from '../services/youtube';
 import { audioFx } from '../services/audioFx';
-import { generateSmartMcAnnouncement, speakSmartMcIndonesian, stopSmartMcSpeech } from '../services/smartMc';
+import { generateSmartMcAnnouncement, speakSmartMcIndonesian, stopSmartMcSpeech, unlockSmartMcAudio } from '../services/smartMc';
 import { useWebRTCAudioReceiver, ActiveWirelessMic } from '../hooks/useWebRTCAudioReceiver';
 import { useKaraokeScoring, LiveScoringState } from '../hooks/useKaraokeScoring';
 import { getSignalingWebSocketUrl } from '../services/signaling';
@@ -24,6 +24,12 @@ interface KaraokeContextType {
   activeCategory: string | null;
   executeSearch: (query?: string, categoryId?: string) => Promise<void>;
   addDirectVideoUrl: (urlOrId: string, singerName?: string, playImmediately?: boolean) => Promise<boolean>;
+
+  // Trending Favorit Hits Indonesia
+  hitsIndonesiaSongs: Song[];
+  hitsLastUpdated: number | null;
+  isRefreshingHits: boolean;
+  refreshHitsIndonesia: () => Promise<boolean>;
 
   // Queue Management
   queue: QueueItem[];
@@ -69,7 +75,7 @@ interface KaraokeContextType {
   submitJuryVote: (score: number, juryName?: string, clientId?: string) => void;
   getJuryAverageSummary: () => JuryScoreSummary;
 
-  // Smart MC Diskomlekau (100% Local Pantun & Indonesian Speech Synthesis)
+  // Smart MC Diskomlekau (100% Local Pantun & Indonesian Voice/TTS)
   activeMcAnnouncement: SmartMcAnnouncement | null;
   isMcSpeaking: boolean;
   isPlayerEnded: boolean;
@@ -87,9 +93,11 @@ interface KaraokeContextType {
   }) => void;
   replaySmartMcSpeech: () => void;
   dismissSmartMc: () => void;
+  unlockTvAudio: () => void;
 
   // Remote & Sync
   roomId: string;
+  connectionStatus: ConnectionStatus;
   remoteConnectedDevices: number;
   remoteClientsList: RemoteClientInfo[];
   remoteNotifications: RemoteNotification[];
@@ -185,20 +193,34 @@ export const KaraokeProvider: React.FC<{ children: React.ReactNode; initialIsTvM
     }
   });
 
-  // Search State
+  // Search & Favorit Hits Indonesia State
+  const [hitsIndonesiaSongs, setHitsIndonesiaSongs] = useState<Song[]>(() => getHitsIndonesiaSongs());
+  const [hitsLastUpdated, setHitsLastUpdated] = useState<number | null>(() => getHitsIndonesiaLastUpdated());
+  const [isRefreshingHits, setIsRefreshingHits] = useState<boolean>(false);
+
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [suffixFilter, setSuffixFilter] = useState<SuffixFilter>('karaoke');
-  const [searchResults, setSearchResults] = useState<Song[]>(() => CURATED_LIBRARY['hits-indonesia'] || []);
+  const [searchResults, setSearchResults] = useState<Song[]>(() => getHitsIndonesiaSongs());
   const [isSearching, setIsSearching] = useState<boolean>(false);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [isCuratedFallback, setIsCuratedFallback] = useState<boolean>(true);
   const [activeCategory, setActiveCategory] = useState<string | null>('hits-indonesia');
 
-  // Player Controls
+  // Player Controls (Default Volume Maksimal 100% agar terdengar lantang)
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
-  const [audioVolume, setAudioVolume] = useState<number>(85);
+  const [audioVolume, setAudioVolume] = useState<number>(100);
   const [isMuted, setIsMuted] = useState<boolean>(false);
   const playerRef = useRef<any>(null);
+  const audioVolumeRef = useRef<number>(100);
+  const isMutedRef = useRef<boolean>(false);
+
+  useEffect(() => {
+    audioVolumeRef.current = audioVolume;
+  }, [audioVolume]);
+
+  useEffect(() => {
+    isMutedRef.current = isMuted;
+  }, [isMuted]);
 
   // Modals & Panels
   const [isQueueOpenMobile, setIsQueueOpenMobile] = useState<boolean>(false);
@@ -211,12 +233,15 @@ export const KaraokeProvider: React.FC<{ children: React.ReactNode; initialIsTvM
     if (urlParams.get('mode') === 'tv' || urlParams.get('tv') === '1') return true;
     return isSmartTvDevice();
   });
+  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>(() =>
+    typeof navigator !== 'undefined' && navigator.onLine === false ? 'disconnected' : 'reconnecting'
+  );
   const [remoteConnectedDevices, setRemoteConnectedDevices] = useState<number>(1);
   const [remoteClientsList, setRemoteClientsList] = useState<RemoteClientInfo[]>([]);
   const [remoteNotifications, setRemoteNotifications] = useState<RemoteNotification[]>([]);
   const [activeReactions, setActiveReactions] = useState<ScreenReaction[]>([]);
 
-  // Smart MC Diskomlekau State
+  // Smart MC Diskomlekau & Audio Ducking State
   const [activeMcAnnouncement, setActiveMcAnnouncement] = useState<SmartMcAnnouncement | null>(null);
   const [isMcSpeaking, setIsMcSpeaking] = useState<boolean>(false);
   const [isPlayerEnded, setIsPlayerEnded] = useState<boolean>(false);
@@ -226,6 +251,8 @@ export const KaraokeProvider: React.FC<{ children: React.ReactNode; initialIsTvM
   const endTransitionTimerRef = useRef<any>(null);
   const isAwaitingEndTransitionQueueSkipRef = useRef<boolean>(false);
   const lastMcTriggerTimeRef = useRef<number>(0);
+  const preDuckVolumeRef = useRef<number>(100);
+  const isDuckingRef = useRef<boolean>(false);
 
   useEffect(() => {
     isPlayingRef.current = isPlaying;
@@ -235,8 +262,10 @@ export const KaraokeProvider: React.FC<{ children: React.ReactNode; initialIsTvM
     isPlayerEndedRef.current = isPlayerEnded;
   }, [isPlayerEnded]);
 
-  // WebSocket and BroadcastChannel references
+  // WebSocket, Retry Queue, and BroadcastChannel references
   const wsRef = useRef<WebSocket | null>(null);
+  const pendingMessagesRef = useRef<string[]>([]);
+  const lastWsPongRef = useRef<number>(Date.now());
   const broadcastRef = useRef<BroadcastChannel | null>(null);
 
   // WebRTC Wireless Microphone Audio Receiver for Master
@@ -263,6 +292,7 @@ export const KaraokeProvider: React.FC<{ children: React.ReactNode; initialIsTvM
     musicDelayMs,
     setMusicDelayMs,
     connectMusicMediaElement,
+    setMusicBoostMultiplier,
   } = useWebRTCAudioReceiver({
     socketRef: wsRef,
     roomId,
@@ -308,6 +338,82 @@ export const KaraokeProvider: React.FC<{ children: React.ReactNode; initialIsTvM
           );
         } catch {}
       });
+    }
+  }, []);
+
+  // Audio Ducking: kecilkan sementara musik karaoke saat Smart MC berbicara, lalu kembalikan ke volume asal
+  const startAudioDucking = useCallback(() => {
+    if (!isDuckingRef.current) {
+      preDuckVolumeRef.current = audioVolumeRef.current;
+      isDuckingRef.current = true;
+    }
+    const duckedVol = Math.max(15, Math.round(preDuckVolumeRef.current * 0.25));
+    applyHardwarePlayerVolume(duckedVol, isMutedRef.current);
+    setMusicBoostMultiplier(0.35);
+  }, [applyHardwarePlayerVolume, setMusicBoostMultiplier]);
+
+  const stopAudioDucking = useCallback(() => {
+    if (!isDuckingRef.current) return;
+    isDuckingRef.current = false;
+    const restoreVol = Math.max(0, Math.min(100, preDuckVolumeRef.current || audioVolumeRef.current));
+    applyHardwarePlayerVolume(restoreVol, isMutedRef.current);
+    setMusicBoostMultiplier(1.45);
+  }, [applyHardwarePlayerVolume, setMusicBoostMultiplier]);
+
+  // Unlock Audio Smart MC & AudioContext pada interaksi pertama layar TV/Master
+  const unlockTvAudio = useCallback(() => {
+    unlockSmartMcAudio();
+    resumeAudio();
+  }, [resumeAudio]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handleFirstInteraction = () => {
+      unlockTvAudio();
+    };
+    window.addEventListener('click', handleFirstInteraction, { once: true, passive: true });
+    window.addEventListener('touchstart', handleFirstInteraction, { once: true, passive: true });
+    window.addEventListener('keydown', handleFirstInteraction, { once: true, passive: true });
+    return () => {
+      window.removeEventListener('click', handleFirstInteraction);
+      window.removeEventListener('touchstart', handleFirstInteraction);
+      window.removeEventListener('keydown', handleFirstInteraction);
+    };
+  }, [unlockTvAudio]);
+
+  // Refresh Favorit Hits Indonesia dengan tren musik YouTube terkini (100% gratis + cache localStorage)
+  const refreshHitsIndonesia = useCallback(async (): Promise<boolean> => {
+    setIsRefreshingHits(true);
+    try {
+      const result = await refreshIndonesianTrendingHits();
+      setHitsIndonesiaSongs(result.songs);
+      setHitsLastUpdated(result.updatedAt);
+      if (activeCategory === 'hits-indonesia' && !searchQuery.trim()) {
+        setSearchResults(result.songs);
+        setIsCuratedFallback(true);
+      }
+      return result.fromOnline;
+    } catch {
+      return false;
+    } finally {
+      setIsRefreshingHits(false);
+    }
+  }, [activeCategory, searchQuery]);
+
+  // Auto-refresh Favorit Hits Indonesia di latar belakang jika cache kosong atau lebih dari 6 jam
+  useEffect(() => {
+    const last = getHitsIndonesiaLastUpdated();
+    const sixHours = 6 * 60 * 60 * 1000;
+    if (!last || Date.now() - last > sixHours) {
+      refreshIndonesianTrendingHits()
+        .then((res) => {
+          setHitsIndonesiaSongs(res.songs);
+          setHitsLastUpdated(res.updatedAt);
+          if (activeCategory === 'hits-indonesia' && !searchQuery.trim()) {
+            setSearchResults(res.songs);
+          }
+        })
+        .catch(() => {});
     }
   }, []);
 
@@ -491,13 +597,28 @@ export const KaraokeProvider: React.FC<{ children: React.ReactNode; initialIsTvM
     return () => clearTimeout(timer);
   }, [syncStateToServer]);
 
-  // Real-time WebSocket connection to server
+  // Real-time WebSocket connection to server with exponential backoff, heartbeat watchdog & retry queue
   useEffect(() => {
     let socket: WebSocket | null = null;
     let sseSource: EventSource | null = null;
     let reconnectTimer: any = null;
     let pingInterval: any = null;
     let retryCount = 0;
+    let isDisposed = false;
+
+    const flushPendingMessages = (activeSocket: WebSocket | null) => {
+      if (!activeSocket || activeSocket.readyState !== WebSocket.OPEN) return;
+      while (pendingMessagesRef.current.length > 0) {
+        const queuedMsg = pendingMessagesRef.current.shift();
+        if (!queuedMsg) continue;
+        try {
+          activeSocket.send(queuedMsg);
+        } catch {
+          pendingMessagesRef.current.unshift(queuedMsg);
+          break;
+        }
+      }
+    };
 
     const fetchRoomState = async () => {
       try {
@@ -508,6 +629,7 @@ export const KaraokeProvider: React.FC<{ children: React.ReactNode; initialIsTvM
         });
         const data = await res.json();
         if (data.success && data.room) {
+          setConnectionStatus('connected');
           const isRecentLocalAction = Date.now() - lastLocalActionTimeRef.current < 3500;
           if (!isRecentLocalAction && !isPlayerEndedRef.current) {
             if (data.room.currentSong) {
@@ -519,6 +641,9 @@ export const KaraokeProvider: React.FC<{ children: React.ReactNode; initialIsTvM
             if (Array.isArray(data.room.queue)) {
               applyServerQueue(data.room.queue);
             }
+          }
+          if (Array.isArray(data.room.juryVotes)) {
+            setJuryVotes(data.room.juryVotes);
           }
           if (typeof data.room.musicDelayMs === 'number') {
             setMusicDelayMs(data.room.musicDelayMs, false);
@@ -538,7 +663,11 @@ export const KaraokeProvider: React.FC<{ children: React.ReactNode; initialIsTvM
           }
         }
       } catch (e) {
-        // ignore
+        if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+          setConnectionStatus('disconnected');
+        } else if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+          setConnectionStatus('reconnecting');
+        }
       } finally {
         isHydratedRef.current = true;
       }
@@ -548,15 +677,22 @@ export const KaraokeProvider: React.FC<{ children: React.ReactNode; initialIsTvM
     fetchRoomState();
 
     const connectWs = () => {
+      if (isDisposed) return;
       if (reconnectTimer) {
         clearTimeout(reconnectTimer);
         reconnectTimer = null;
+      }
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+        setConnectionStatus('disconnected');
+        reconnectTimer = setTimeout(connectWs, 3000);
+        return;
       }
       try {
         const wsUrl = getSignalingWebSocketUrl({
           roomId,
           role: 'master',
           singerName: 'Layar Utama',
+          clientId: 'master-cockpit',
         });
 
         socket = new WebSocket(wsUrl);
@@ -564,15 +700,27 @@ export const KaraokeProvider: React.FC<{ children: React.ReactNode; initialIsTvM
 
         socket.onopen = () => {
           retryCount = 0;
+          lastWsPongRef.current = Date.now();
+          setConnectionStatus('connected');
+          flushPendingMessages(socket);
+          fetchRoomState();
           if (pingInterval) clearInterval(pingInterval);
-          // Ping every 5 seconds to maintain rock-solid connection
+          // Heartbeat ping + watchdog every 4.5 seconds
           pingInterval = setInterval(() => {
-            if (socket && socket.readyState === WebSocket.OPEN) {
+            if (!socket) return;
+            if (socket.readyState === WebSocket.OPEN) {
+              if (Date.now() - lastWsPongRef.current > 14000) {
+                setConnectionStatus('reconnecting');
+                try {
+                  socket.close();
+                } catch {}
+                return;
+              }
               try {
                 socket.send(JSON.stringify({ type: 'PING', roomId, timestamp: Date.now() }));
               } catch {}
             }
-          }, 5000);
+          }, 4500);
         };
 
         socket.onmessage = (event) => {
@@ -580,7 +728,13 @@ export const KaraokeProvider: React.FC<{ children: React.ReactNode; initialIsTvM
             const data = JSON.parse(event.data);
             if (!data || !data.type) return;
 
+            lastWsPongRef.current = Date.now();
+            setConnectionStatus('connected');
+
             switch (data.type) {
+              case 'PONG':
+                break;
+
               case 'HEARTBEAT': {
                 try {
                   socket?.send(JSON.stringify({ type: 'PONG', roomId, timestamp: Date.now() }));
@@ -599,6 +753,9 @@ export const KaraokeProvider: React.FC<{ children: React.ReactNode; initialIsTvM
                   }
                   if (Array.isArray(data.payload.queue)) {
                     applyServerQueue(data.payload.queue);
+                  }
+                  if (Array.isArray(data.payload.juryVotes)) {
+                    setJuryVotes(data.payload.juryVotes);
                   }
                   if (typeof data.payload.musicVolume === 'number') {
                     const nextVol = Math.max(0, Math.min(100, Math.round(data.payload.musicVolume)));
@@ -834,8 +991,12 @@ export const KaraokeProvider: React.FC<{ children: React.ReactNode; initialIsTvM
             clearInterval(pingInterval);
             pingInterval = null;
           }
+          if (isDisposed) return;
+          setConnectionStatus(
+            typeof navigator !== 'undefined' && navigator.onLine === false ? 'disconnected' : 'reconnecting'
+          );
           retryCount++;
-          const delay = Math.min(1500 * Math.pow(1.3, retryCount), 10000);
+          const delay = Math.min(1000 * Math.pow(1.5, retryCount), 15000);
           reconnectTimer = setTimeout(connectWs, delay);
         };
 
@@ -845,6 +1006,7 @@ export const KaraokeProvider: React.FC<{ children: React.ReactNode; initialIsTvM
           } catch {}
         };
       } catch (e) {
+        setConnectionStatus('reconnecting');
         connectSSE();
       }
     };
@@ -937,14 +1099,26 @@ export const KaraokeProvider: React.FC<{ children: React.ReactNode; initialIsTvM
 
     // Fast auto-reconnect on visibility change, network return, or window focus
     const handleWakeReconnect = () => {
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+        setConnectionStatus('disconnected');
+        return;
+      }
       if (!socket || socket.readyState !== WebSocket.OPEN) {
+        setConnectionStatus('reconnecting');
         connectWs();
+      } else {
+        flushPendingMessages(socket);
       }
       fetchRoomState();
     };
 
+    const handleOffline = () => {
+      setConnectionStatus('disconnected');
+    };
+
     document.addEventListener('visibilitychange', handleWakeReconnect);
     window.addEventListener('online', handleWakeReconnect);
+    window.addEventListener('offline', handleOffline);
     window.addEventListener('focus', handleWakeReconnect);
     window.addEventListener('pageshow', handleWakeReconnect);
 
@@ -952,8 +1126,10 @@ export const KaraokeProvider: React.FC<{ children: React.ReactNode; initialIsTvM
     const pollTimer = setInterval(fetchRoomState, 4000);
 
     return () => {
+      isDisposed = true;
       document.removeEventListener('visibilitychange', handleWakeReconnect);
       window.removeEventListener('online', handleWakeReconnect);
+      window.removeEventListener('offline', handleOffline);
       window.removeEventListener('focus', handleWakeReconnect);
       window.removeEventListener('pageshow', handleWakeReconnect);
       clearInterval(pollTimer);
@@ -1074,33 +1250,53 @@ export const KaraokeProvider: React.FC<{ children: React.ReactNode; initialIsTvM
     }
   }, [roomId]);
 
-  // Send message helper across sync channels
+  // Send message helper across sync channels with automatic retry queue when offline/reconnecting
   const broadcastMessage = useCallback(
     (type: WebSocketMessage['type'], payload?: any) => {
+      const serialized = JSON.stringify({
+        type,
+        roomId,
+        payload,
+        timestamp: Date.now(),
+      });
+
       // 1. BroadcastChannel (same browser tabs)
       if (broadcastRef.current) {
-        broadcastRef.current.postMessage({
-          type,
-          roomId,
-          payload,
-          timestamp: Date.now(),
-        });
+        try {
+          broadcastRef.current.postMessage({
+            type,
+            roomId,
+            payload,
+            timestamp: Date.now(),
+          });
+        } catch {}
       }
 
-      // 2. WebSocket (remote network devices)
+      // 2. WebSocket (remote network devices) + retry queue if socket temporarily down
       if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
         try {
-          wsRef.current.send(
-            JSON.stringify({
-              type,
-              roomId,
-              payload,
-              timestamp: Date.now(),
-            })
-          );
-        } catch (e) {
-          // ignore
+          wsRef.current.send(serialized);
+          return;
+        } catch {}
+      }
+
+      const criticalTypes = new Set<string>([
+        'PLAY_NOW',
+        'ADD_QUEUE_ITEM',
+        'REMOVE_QUEUE_ITEM',
+        'SYNC_QUEUE',
+        'SKIP_NEXT',
+        'TOGGLE_PAUSE',
+        'SET_MUSIC_VOLUME',
+        'SUBMIT_JURY_SCORE',
+        'TRIGGER_SMART_MC',
+        'SYNC_STATE',
+      ]);
+      if (criticalTypes.has(type)) {
+        if (pendingMessagesRef.current.length >= 25) {
+          pendingMessagesRef.current.shift();
         }
+        pendingMessagesRef.current.push(serialized);
       }
     },
     [roomId]
@@ -1471,7 +1667,7 @@ export const KaraokeProvider: React.FC<{ children: React.ReactNode; initialIsTvM
     );
   }, []);
 
-  // Helper to immediately stop Smart MC speech and hide banner when playback starts/resumes
+  // Helper to immediately stop Smart MC speech, restore ducked volume, and hide banner when playback starts/resumes
   const clearSmartMcImmediately = useCallback(() => {
     if (mcDismissTimerRef.current) {
       clearTimeout(mcDismissTimerRef.current);
@@ -1483,9 +1679,10 @@ export const KaraokeProvider: React.FC<{ children: React.ReactNode; initialIsTvM
     }
     isAwaitingEndTransitionQueueSkipRef.current = false;
     stopSmartMcSpeech();
+    stopAudioDucking();
     setIsMcSpeaking(false);
     setActiveMcAnnouncement(null);
-  }, []);
+  }, [stopAudioDucking]);
 
   // Play Song Immediately
   const playSongNow = useCallback(
@@ -1764,16 +1961,24 @@ export const KaraokeProvider: React.FC<{ children: React.ReactNode; initialIsTvM
       clearTimeout(mcDismissTimerRef.current);
     }
     mcDismissTimerRef.current = setTimeout(() => {
+      stopAudioDucking();
       setActiveMcAnnouncement(null);
       setIsMcSpeaking(false);
-    }, 7000);
+    }, 9500);
 
     speakSmartMcIndonesian(
       activeMcAnnouncement.tier,
-      () => setIsMcSpeaking(true),
-      () => setIsMcSpeaking(false)
+      () => {
+        startAudioDucking();
+        setIsMcSpeaking(true);
+      },
+      () => {
+        stopAudioDucking();
+        setIsMcSpeaking(false);
+      },
+      activeMcAnnouncement.fullSpeechText
     );
-  }, [activeMcAnnouncement]);
+  }, [activeMcAnnouncement, startAudioDucking, stopAudioDucking]);
 
   const triggerSmartMc = useCallback(
     (options?: {
@@ -1795,6 +2000,7 @@ export const KaraokeProvider: React.FC<{ children: React.ReactNode; initialIsTvM
       // pemicu otomatis Smart MC wajib diblokir total dan suara audio MC dihentikan.
       if (!isManualTrigger && isPlayingRef.current && !isPlayerEndedRef.current) {
         stopSmartMcSpeech();
+        stopAudioDucking();
         setIsMcSpeaking(false);
         setActiveMcAnnouncement(null);
         return;
@@ -1832,19 +2038,25 @@ export const KaraokeProvider: React.FC<{ children: React.ReactNode; initialIsTvM
       if (mcDismissTimerRef.current) {
         clearTimeout(mcDismissTimerRef.current);
       }
-      // Otomatis sembunyikan banner Smart MC setelah 7 detik (6-8 detik) agar tidak menutupi layar TV terus-menerus
+      // Otomatis sembunyikan banner Smart MC setelah suara MC selesai (maks 10 detik)
       mcDismissTimerRef.current = setTimeout(() => {
+        stopAudioDucking();
         setActiveMcAnnouncement(null);
         setIsMcSpeaking(false);
-      }, 7000);
+      }, 10000);
 
       speakSmartMcIndonesian(
         announcement.tier,
-        () => setIsMcSpeaking(true),
         () => {
+          startAudioDucking();
+          setIsMcSpeaking(true);
+        },
+        () => {
+          stopAudioDucking();
           setIsMcSpeaking(false);
           options?.onSpeechEnd?.();
-        }
+        },
+        announcement.fullSpeechText
       );
 
       if (options?.broadcast) {
@@ -1857,7 +2069,7 @@ export const KaraokeProvider: React.FC<{ children: React.ReactNode; initialIsTvM
         });
       }
     },
-    [currentScoreData, juryVotes, defaultSingerName, currentSong, broadcastMessage]
+    [currentScoreData, juryVotes, defaultSingerName, currentSong, broadcastMessage, startAudioDucking, stopAudioDucking]
   );
 
   const triggerSmartMcRef = useRef(triggerSmartMc);
@@ -2620,6 +2832,10 @@ export const KaraokeProvider: React.FC<{ children: React.ReactNode; initialIsTvM
         activeCategory,
         executeSearch,
         addDirectVideoUrl,
+        hitsIndonesiaSongs,
+        hitsLastUpdated,
+        isRefreshingHits,
+        refreshHitsIndonesia,
         queue,
         currentSong,
         history,
@@ -2662,7 +2878,9 @@ export const KaraokeProvider: React.FC<{ children: React.ReactNode; initialIsTvM
         triggerSmartMc,
         replaySmartMcSpeech,
         dismissSmartMc,
+        unlockTvAudio,
         roomId,
+        connectionStatus,
         remoteConnectedDevices,
         remoteClientsList,
         remoteNotifications,

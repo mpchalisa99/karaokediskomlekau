@@ -29,6 +29,7 @@ export const Header: React.FC = () => {
     defaultSingerName,
     setDefaultSingerName,
     roomId,
+    connectionStatus,
   } = useKaraoke();
 
   const [isEditingSinger, setIsEditingSinger] = useState(false);
@@ -182,14 +183,45 @@ export const Header: React.FC = () => {
 
         {/* Primary Controls */}
         <div className="flex items-center gap-2 shrink-0">
-          {/* Room & Live HP Connected Badge */}
+          {/* Room, Connection Status & Live HP Connected Badge */}
           <div className="flex items-center gap-1.5 rounded-xl border border-sky-500/40 bg-[#091b3e] px-2.5 py-1 text-xs font-mono shadow-sm">
             <Smartphone className="h-3.5 w-3.5 text-sky-400" />
             <span className="text-amber-300 font-bold">{roomId}</span>
             <span className="text-slate-500">·</span>
-            <span className="flex items-center gap-1 text-[11px] text-emerald-400 font-bold">
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
-              {remoteConnectedDevices} HP
+            <span
+              className={`flex items-center gap-1 text-[11px] font-bold ${
+                connectionStatus === 'connected'
+                  ? 'text-emerald-400'
+                  : connectionStatus === 'reconnecting'
+                  ? 'text-amber-300'
+                  : 'text-rose-400'
+              }`}
+              title={
+                connectionStatus === 'connected'
+                  ? 'Koneksi Master & Server Terhubung'
+                  : connectionStatus === 'reconnecting'
+                  ? 'Menyambung Ulang ke Server...'
+                  : 'Koneksi Terputus'
+              }
+            >
+              <span
+                className={`h-1.5 w-1.5 rounded-full ${
+                  connectionStatus === 'connected'
+                    ? 'bg-emerald-400 animate-pulse'
+                    : connectionStatus === 'reconnecting'
+                    ? 'bg-amber-400 animate-pulse'
+                    : 'bg-rose-500'
+                }`}
+              />
+              <span className="hidden xl:inline">
+                {connectionStatus === 'connected'
+                  ? 'Terhubung'
+                  : connectionStatus === 'reconnecting'
+                  ? 'Menyambung Ulang'
+                  : 'Terputus'}
+              </span>
+              <span className="text-slate-500 hidden xl:inline">·</span>
+              <span className="text-emerald-300">{remoteConnectedDevices} HP</span>
             </span>
           </div>
 

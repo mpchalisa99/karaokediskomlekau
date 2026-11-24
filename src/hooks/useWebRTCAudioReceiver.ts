@@ -98,9 +98,11 @@ export function useWebRTCAudioReceiver({ socketRef, roomId }: UseWebRTCAudioRece
     [socketRef]
   );
 
-  // Web Audio API DelayNode for TV Music Sync
+  // Web Audio API DelayNode + Loudness Boost + Limiter for TV Music Sync & Ducking
   const musicDelayNodeRef = useRef<DelayNode | null>(null);
   const musicGainNodeRef = useRef<GainNode | null>(null);
+  const musicCompressorNodeRef = useRef<DynamicsCompressorNode | null>(null);
+  const musicBoostMultiplierRef = useRef<number>(1.45);
   const connectedMusicElementsRef = useRef<WeakSet<HTMLMediaElement>>(new WeakSet());
   const musicDelayMsRef = useRef<number>(70);
 
@@ -120,6 +122,30 @@ export function useWebRTCAudioReceiver({ socketRef, roomId }: UseWebRTCAudioRece
     isMutedRef.current = isMasterMicMuted;
   }, [isMasterMicMuted]);
 
+  const ensureMusicAudioGraph = useCallback((ctx: AudioContext) => {
+    if (!musicDelayNodeRef.current || !musicGainNodeRef.current) {
+      const delay = ctx.createDelay(1.0);
+      delay.delayTime.setValueAtTime(musicDelayMsRef.current / 1000, ctx.currentTime);
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(musicBoostMultiplierRef.current, ctx.currentTime);
+
+      const compressor = ctx.createDynamicsCompressor();
+      compressor.threshold.setValueAtTime(-8, ctx.currentTime);
+      compressor.knee.setValueAtTime(12, ctx.currentTime);
+      compressor.ratio.setValueAtTime(6, ctx.currentTime);
+      compressor.attack.setValueAtTime(0.003, ctx.currentTime);
+      compressor.release.setValueAtTime(0.15, ctx.currentTime);
+
+      delay.connect(gain);
+      gain.connect(compressor);
+      compressor.connect(ctx.destination);
+
+      musicDelayNodeRef.current = delay;
+      musicGainNodeRef.current = gain;
+      musicCompressorNodeRef.current = compressor;
+    }
+  }, []);
+
   // Initialize or retrieve shared AudioContext with minimum hardware latency hint
   const getAudioContext = useCallback(() => {
     if (!audioContextRef.current || audioContextRef.current.state === 'closed') {
@@ -133,16 +159,9 @@ export function useWebRTCAudioReceiver({ socketRef, roomId }: UseWebRTCAudioRece
         }
         audioContextRef.current = ctx;
 
-        // Initialize dedicated Music DelayNode pipeline
+        // Initialize dedicated Music DelayNode + Gain Boost + Limiter pipeline
         try {
-          const delay = ctx.createDelay(1.0);
-          delay.delayTime.setValueAtTime(musicDelayMsRef.current / 1000, ctx.currentTime);
-          const gain = ctx.createGain();
-          gain.gain.setValueAtTime(1.0, ctx.currentTime);
-          delay.connect(gain);
-          gain.connect(ctx.destination);
-          musicDelayNodeRef.current = delay;
-          musicGainNodeRef.current = gain;
+          ensureMusicAudioGraph(ctx);
         } catch (e) {
           console.warn('[WebAudio] DelayNode init error:', e);
         }
@@ -161,6 +180,24 @@ export function useWebRTCAudioReceiver({ socketRef, roomId }: UseWebRTCAudioRece
     }
 
     return audioContextRef.current;
+  }, [ensureMusicAudioGraph]);
+
+  // Smoothly adjust music loudness boost / ducking multiplier (1.45 normal, ~0.35 when MC speaks)
+  const setMusicBoostMultiplier = useCallback((multiplier: number) => {
+    const clamped = Math.max(0.05, Math.min(2.0, multiplier));
+    musicBoostMultiplierRef.current = clamped;
+    const ctx = audioContextRef.current;
+    const gainNode = musicGainNodeRef.current;
+    if (ctx && gainNode) {
+      try {
+        const now = ctx.currentTime;
+        gainNode.gain.cancelScheduledValues(now);
+        gainNode.gain.setValueAtTime(gainNode.gain.value, now);
+        gainNode.gain.linearRampToValueAtTime(clamped, now + 0.18);
+      } catch {
+        gainNode.gain.value = clamped;
+      }
+    }
   }, []);
 
   // Update Music Delay with smooth Web Audio DelayNode parameter ramping
@@ -202,7 +239,7 @@ export function useWebRTCAudioReceiver({ socketRef, roomId }: UseWebRTCAudioRece
     [roomId, socketRef]
   );
 
-  // Connect any HTMLMediaElement (audio/video music player) through TV Music DelayNode
+  // Connect any HTMLMediaElement (audio/video music player) through TV Music DelayNode + Gain Boost + Limiter
   const connectMusicMediaElement = useCallback(
     (mediaElem: HTMLMediaElement) => {
       if (!mediaElem) return;
@@ -210,28 +247,19 @@ export function useWebRTCAudioReceiver({ socketRef, roomId }: UseWebRTCAudioRece
       if (!ctx) return;
 
       try {
-        if (!musicDelayNodeRef.current) {
-          const delay = ctx.createDelay(1.0);
-          delay.delayTime.setValueAtTime(musicDelayMsRef.current / 1000, ctx.currentTime);
-          const gain = ctx.createGain();
-          gain.gain.setValueAtTime(1.0, ctx.currentTime);
-          delay.connect(gain);
-          gain.connect(ctx.destination);
-          musicDelayNodeRef.current = delay;
-          musicGainNodeRef.current = gain;
-        }
+        ensureMusicAudioGraph(ctx);
 
-        if (!connectedMusicElementsRef.current.has(mediaElem)) {
+        if (musicDelayNodeRef.current && !connectedMusicElementsRef.current.has(mediaElem)) {
           const source = ctx.createMediaElementSource(mediaElem);
           source.connect(musicDelayNodeRef.current);
           connectedMusicElementsRef.current.add(mediaElem);
-          console.log('[WebAudio TV] Music media element routed through DelayNode successfully');
+          console.log('[WebAudio TV] Music media element routed through Boost+Limiter+DelayNode successfully');
         }
       } catch (err) {
         console.warn('[WebAudio TV] connectMusicMediaElement:', err);
       }
     },
-    [getAudioContext]
+    [ensureMusicAudioGraph, getAudioContext]
   );
 
   // Explicit user unlock action (e.g. clicking "Aktifkan Audio" or touching screen)
@@ -1196,6 +1224,12 @@ export function useWebRTCAudioReceiver({ socketRef, roomId }: UseWebRTCAudioRece
       });
       audioNodesRef.current.clear();
 
+      if (musicCompressorNodeRef.current) {
+        try {
+          musicCompressorNodeRef.current.disconnect();
+        } catch {}
+        musicCompressorNodeRef.current = null;
+      }
       if (musicDelayNodeRef.current) {
         try {
           musicDelayNodeRef.current.disconnect();
@@ -1251,5 +1285,6 @@ export function useWebRTCAudioReceiver({ socketRef, roomId }: UseWebRTCAudioRece
     musicDelayMs,
     setMusicDelayMs,
     connectMusicMediaElement,
+    setMusicBoostMultiplier,
   };
 }

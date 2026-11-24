@@ -64,6 +64,8 @@ export const TVStageMode: React.FC<TVStageModeProps> = ({ standalone = false }) 
     audioVolume,
     isMuted,
     triggerSmartMc,
+    connectionStatus,
+    unlockTvAudio,
   } = useKaraoke();
 
   const [tvQrUrl, setTvQrUrl] = useState<string>('');
@@ -148,6 +150,7 @@ export const TVStageMode: React.FC<TVStageModeProps> = ({ standalone = false }) 
     if (!isTvMode && !standalone) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
+      unlockTvAudio();
       const keyCode = e.keyCode || e.which;
       const key = e.key;
 
@@ -166,7 +169,7 @@ export const TVStageMode: React.FC<TVStageModeProps> = ({ standalone = false }) 
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isTvMode, standalone, togglePlayPause, handleExit]);
+  }, [isTvMode, standalone, togglePlayPause, handleExit, unlockTvAudio]);
 
   // Deteksi event lagu & progres playback dari YouTube iframe untuk auto-scoring 60 detik & auto-play di TV
   useEffect(() => {
@@ -264,6 +267,7 @@ export const TVStageMode: React.FC<TVStageModeProps> = ({ standalone = false }) 
   return (
     <div
       className={`tv-stage-root ${isFullscreen ? 'tv-fullscreen-mode' : ''}`}
+      onClick={() => unlockTvAudio()}
       style={{
         position: 'fixed',
         top: 0,
@@ -614,7 +618,7 @@ export const TVStageMode: React.FC<TVStageModeProps> = ({ standalone = false }) 
                       }));
                 const stageSum = stageVotes.reduce((acc, v) => acc + v.score, 0);
                 const stageAvg = Math.round(stageSum / stageVotes.length);
-                const stageQuote = getScoreQuote(stageAvg);
+                const stageQuote = getScoreQuote(stageAvg, currentScoreData.evaluatedAt);
 
                 return (
                   <div
@@ -1156,7 +1160,7 @@ export const TVStageMode: React.FC<TVStageModeProps> = ({ standalone = false }) 
                 const tvSum = tvVotes.reduce((acc, v) => acc + v.score, 0);
                 const tvAvg = Math.round(tvSum / tvVotes.length);
                 const tvExpr = tvVotes.map((v) => v.score).join('+');
-                const tvQuote = getScoreQuote(tvAvg);
+                const tvQuote = getScoreQuote(tvAvg, currentScoreData.evaluatedAt);
 
                 return (
                   <div
@@ -1527,10 +1531,54 @@ export const TVStageMode: React.FC<TVStageModeProps> = ({ standalone = false }) 
         }}
         aria-label="Running Text Ticker & Kontrol TV"
       >
-        {/* Indikator Live di Kiri */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#fcd34d', fontFamily: 'monospace', fontSize: '11px', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.05em', paddingRight: '12px', borderRight: '1px solid rgba(255,255,255,0.1)', flexShrink: 0 }}>
+        {/* Indikator Live & Status Koneksi di Kiri */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#fcd34d', fontFamily: 'monospace', fontSize: '11px', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.05em', paddingRight: '12px', borderRight: '1px solid rgba(255,255,255,0.1)', flexShrink: 0 }}>
           <Radio style={{ width: '14px', height: '14px', color: '#38bdf8' }} />
           <span>DISKOMLEK LIVE</span>
+          <span
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '4px',
+              padding: '2px 7px',
+              borderRadius: '6px',
+              backgroundColor:
+                connectionStatus === 'connected'
+                  ? 'rgba(6, 78, 59, 0.85)'
+                  : connectionStatus === 'reconnecting'
+                  ? 'rgba(120, 53, 15, 0.85)'
+                  : 'rgba(136, 19, 55, 0.85)',
+              color:
+                connectionStatus === 'connected'
+                  ? '#6ee7b7'
+                  : connectionStatus === 'reconnecting'
+                  ? '#fde68a'
+                  : '#fda4af',
+              fontSize: '9.5px',
+              fontWeight: 800,
+              textTransform: 'none',
+            }}
+          >
+            <span
+              style={{
+                width: '6px',
+                height: '6px',
+                borderRadius: '50%',
+                backgroundColor:
+                  connectionStatus === 'connected'
+                    ? '#34d399'
+                    : connectionStatus === 'reconnecting'
+                    ? '#fbbf24'
+                    : '#f43f5e',
+                display: 'inline-block',
+              }}
+            />
+            {connectionStatus === 'connected'
+              ? 'Terhubung'
+              : connectionStatus === 'reconnecting'
+              ? 'Menyambung Ulang'
+              : 'Terputus'}
+          </span>
         </div>
 
         {/* Running Text Marquee */}

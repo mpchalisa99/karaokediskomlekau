@@ -1,5 +1,5 @@
 import React from 'react';
-import { Flame, Sun, Radio, Music, Disc, Sparkles, Radar, Rocket, Shield, Globe } from 'lucide-react';
+import { Flame, Sun, Radio, Music, Disc, Sparkles, Shield, Globe, RefreshCw } from 'lucide-react';
 import { CATEGORY_PRESETS } from '../services/youtube';
 import { useKaraoke } from '../context/KaraokeContext';
 
@@ -15,21 +15,44 @@ const ICON_MAP: Record<string, React.ReactNode> = {
 };
 
 export const CategoryChips: React.FC = () => {
-  const { executeSearch, activeCategory, setSearchQuery } = useKaraoke();
+  const {
+    executeSearch,
+    activeCategory,
+    setSearchQuery,
+    refreshHitsIndonesia,
+    isRefreshingHits,
+  } = useKaraoke();
 
   const handleChipClick = (id: string, query: string) => {
+    if (id === 'hits-indonesia') {
+      setSearchQuery('');
+      executeSearch('', id);
+      return;
+    }
     setSearchQuery(query);
     executeSearch(query, id);
   };
 
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
         <span className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
           <Music className="h-3.5 w-3.5 text-sky-400" />
           <span>Kategori Lagu Populer:</span>
         </span>
-        <span className="text-[11px] text-slate-400">Sentuh untuk memuat daftar lagu</span>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => refreshHitsIndonesia()}
+            disabled={isRefreshingHits}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-rose-500/50 bg-rose-950/60 hover:bg-rose-900/70 px-2.5 py-1 text-[11px] font-bold text-rose-200 transition disabled:opacity-50 cursor-pointer"
+            title="Ambil tren musik karaoke Indonesia terbaru dari YouTube dan simpan ke cache"
+          >
+            <RefreshCw className={`h-3 w-3 ${isRefreshingHits ? 'animate-spin' : ''}`} />
+            <span>{isRefreshingHits ? 'Memperbarui Tren...' : 'Update Tren Hits'}</span>
+          </button>
+          <span className="hidden sm:inline text-[11px] text-slate-400">Sentuh untuk memuat daftar lagu</span>
+        </div>
       </div>
 
       <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">

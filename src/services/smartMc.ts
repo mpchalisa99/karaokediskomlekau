@@ -576,40 +576,62 @@ export function generateSmartMcAnnouncement(options: GenerateSmartMcOptions = {}
 // Referensi global untuk elemen HTML5 <audio> Smart MC & timer penyelesaian
 let activeMcAudioRef: HTMLAudioElement | null = null;
 let fallbackSpeechTimerRef: ReturnType<typeof setTimeout> | null = null;
+let isMcAudioUnlocked = false;
+
+// Tiny silent WAV data URI for unlocking HTML5 <audio> on Samsung Tizen OS / iOS / Android
+const SILENT_UNLOCK_WAV =
+  'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA';
 
 /**
- * Daftar prioritas file MP3 lokal di folder /sounds/ untuk masing-masing kategori Smart MC,
- * lengkap dengan fallback otomatis ke file audio sorak yang sudah ada (/sounds/cheer.mp3,
- * /sounds/applause.mp3, /sounds/hormat.mp3, /sounds/boo.mp3) jika file khusus MC belum ditemukan.
+ * Membuka kunci policy autoplay HTML5 <audio> saat interaksi pertama di layar TV Samsung / browser.
+ */
+export function unlockSmartMcAudio(): void {
+  if (typeof window === 'undefined' || isMcAudioUnlocked) return;
+  try {
+    const unlockAudio = new Audio(SILENT_UNLOCK_WAV);
+    unlockAudio.volume = 0.01;
+    const p = unlockAudio.play();
+    if (p && typeof p.then === 'function') {
+      p.then(() => {
+        isMcAudioUnlocked = true;
+      }).catch(() => {});
+    } else {
+      isMcAudioUnlocked = true;
+    }
+  } catch {
+    // Abaikan jika browser belum mengizinkan
+  }
+}
+
+/**
+ * Daftar prioritas file MP3 lokal MC Wanita di folder /sounds/ untuk masing-masing kategori Smart MC.
+ * Jika file MC Wanita spesifik belum tersedia di /public/sounds/, sistem otomatis memanggil
+ * endpoint /api/tts (suara MC wanita bahasa Indonesia) lalu fallback ke file MP3 lokal yang tersedia.
  */
 export const SMART_MC_AUDIO_FILES: Record<SmartMcTier, string[]> = {
   high: [
-    '/sounds/mc-high.mp3',
-    '/sounds/mc-pantun.mp3',
-    '/sounds/cheer.mp3',
-    '/sounds/applause.mp3',
-    '/sounds/hormat.mp3',
+    '/sounds/mc-wanita-pantun.mp3',
+    '/sounds/mc-wanita-komentar.mp3',
   ],
   medium: [
-    '/sounds/mc-medium.mp3',
-    '/sounds/mc-pantun.mp3',
-    '/sounds/applause.mp3',
-    '/sounds/cheer.mp3',
-    '/sounds/hormat.mp3',
+    '/sounds/mc-wanita-pantun.mp3',
+    '/sounds/mc-wanita-komentar.mp3',
   ],
   low: [
-    '/sounds/mc-low.mp3',
-    '/sounds/mc-pantun.mp3',
-    '/sounds/boo.mp3',
-    '/sounds/cheer.mp3',
-    '/sounds/applause.mp3',
+    '/sounds/mc-wanita-komentar.mp3',
+    '/sounds/mc-wanita-pantun.mp3',
   ],
   manual: [
-    '/sounds/mc-pantun.mp3',
-    '/sounds/hormat.mp3',
-    '/sounds/cheer.mp3',
-    '/sounds/applause.mp3',
+    '/sounds/mc-wanita-sapa.mp3',
+    '/sounds/mc-wanita-pantun.mp3',
   ],
+};
+
+export const SMART_MC_OFFLINE_FALLBACK_FILES: Record<SmartMcTier, string[]> = {
+  high: ['/sounds/mc-high.mp3', '/sounds/mc-pantun.mp3', '/sounds/cheer.mp3', '/sounds/applause.mp3'],
+  medium: ['/sounds/mc-medium.mp3', '/sounds/mc-pantun.mp3', '/sounds/applause.mp3', '/sounds/cheer.mp3'],
+  low: ['/sounds/mc-low.mp3', '/sounds/mc-pantun.mp3', '/sounds/boo.mp3', '/sounds/cheer.mp3'],
+  manual: ['/sounds/mc-pantun.mp3', '/sounds/hormat.mp3', '/sounds/cheer.mp3', '/sounds/applause.mp3'],
 };
 
 /**
@@ -634,21 +656,27 @@ export function stopSmartMcSpeech(): void {
 }
 
 /**
- * Memutar suara Smart MC menggunakan mekanisme HTML5 <audio> / new Audio('/sounds/...')
- * dari file MP3 lokal (TANPA window.speechSynthesis) yang terintegrasi dengan engine suara sorak.
- * Jika file MP3 utama belum ditemukan, otomatis fallback ke file audio sorak (/sounds/cheer.mp3, dll).
+ * Memutar suara MC Wanita yang merdu & ramah menggunakan HTML5 <audio> (`new Audio(...)`)
+ * (100% TANPA window.speechSynthesis agar berjalan normal di Smart TV Samsung Tizen OS):
+ * 1. Prioritaskan file MP3 lokal MC Wanita di `/sounds/` (`/sounds/mc-wanita-pantun.mp3`, `/sounds/mc-wanita-komentar.mp3`, `/sounds/mc-wanita-sapa.mp3`)
+ * 2. Cadangan otomatis ke `/api/tts` (suara wanita Bahasa Indonesia) jika file MP3 spesifik belum tersedia
+ * 3. Cadangan offline ke MP3 lokal yang sudah ada + bus audioFx jika jaringan terputus
  */
 export function playSmartMcAudio(
   tierOrText: SmartMcTier | string = 'manual',
   onStart?: () => void,
-  onEnd?: () => void
+  onEnd?: () => void,
+  speechText?: string
 ): void {
   stopSmartMcSpeech();
 
-  const resolvedTier: SmartMcTier =
-    tierOrText === 'low' || tierOrText === 'medium' || tierOrText === 'high' || tierOrText === 'manual'
-      ? tierOrText
-      : 'manual';
+  const isTier =
+    tierOrText === 'low' || tierOrText === 'medium' || tierOrText === 'high' || tierOrText === 'manual';
+  const resolvedTier: SmartMcTier = isTier ? tierOrText : 'manual';
+  const resolvedText =
+    (speechText && speechText.trim()) ||
+    (!isTier && tierOrText.trim()) ||
+    'Halo sobat Diskomlekau! Tetap semangat bernyanyi, pantang mundur walau suara hancur!';
 
   let hasCompleted = false;
   const finishOnce = () => {
@@ -669,29 +697,37 @@ export function playSmartMcAudio(
 
   onStart?.();
 
-  // 1. Jalankan bus audio sorak yang sudah terbukti berbunyi lantang di Smart TV Samsung (Tizen OS)
-  try {
-    audioFx.playSmartMc(resolvedTier);
-  } catch {
-    // Abaikan jika Web Audio belum siap
-  }
+  // Susun rantai prioritas audio:
+  // 1) File MP3 lokal MC Wanita -> 2) Endpoint /api/tts suara Indonesia -> 3) MP3 fallback lokal
+  const localFemaleFiles = SMART_MC_AUDIO_FILES[resolvedTier] || SMART_MC_AUDIO_FILES.manual;
+  const ttsEndpoint = `/api/tts?text=${encodeURIComponent(resolvedText.slice(0, 380))}&tier=${encodeURIComponent(resolvedTier)}`;
+  const offlineFallbacks = SMART_MC_OFFLINE_FALLBACK_FILES[resolvedTier] || SMART_MC_OFFLINE_FALLBACK_FILES.manual;
+  const candidateFiles = [...localFemaleFiles, ttsEndpoint, ...offlineFallbacks];
 
-  // 2. Putar file MP3 lokal menggunakan elemen HTML5 new Audio('/sounds/...') dengan rantai fallback otomatis
-  const candidateFiles = SMART_MC_AUDIO_FILES[resolvedTier] || SMART_MC_AUDIO_FILES.manual;
-
-  // Safety timer agar status speaking & transisi lagu selalu selesai tepat waktu (~3.6 detik)
-  fallbackSpeechTimerRef = setTimeout(finishOnce, 3600);
+  // Safety timer agar status speaking & ducking selalu pulih tepat waktu
+  fallbackSpeechTimerRef = setTimeout(finishOnce, 12000);
 
   const tryPlayCandidate = (index: number) => {
     if (hasCompleted || index >= candidateFiles.length) {
+      try {
+        audioFx.playSmartMc(resolvedTier);
+      } catch {}
+      setTimeout(finishOnce, 2200);
       return;
     }
 
     const src = candidateFiles[index];
+    const isFinalOfflineStage = index >= localFemaleFiles.length + 1;
+    if (isFinalOfflineStage && index === localFemaleFiles.length + 1) {
+      try {
+        audioFx.playSmartMc(resolvedTier);
+      } catch {}
+    }
+
     try {
       const audio = new Audio(src);
       audio.preload = 'auto';
-      audio.volume = 0.85;
+      audio.volume = 1.0;
       activeMcAudioRef = audio;
 
       audio.onended = () => {
@@ -699,14 +735,12 @@ export function playSmartMcAudio(
       };
 
       audio.onerror = () => {
-        // Fallback otomatis ke file MP3 berikutnya (misal /sounds/cheer.mp3 atau /sounds/applause.mp3)
         tryPlayCandidate(index + 1);
       };
 
       const playPromise = audio.play();
       if (playPromise && typeof playPromise.catch === 'function') {
         playPromise.catch(() => {
-          // Jika file gagal diputar, coba kandidat fallback berikutnya tanpa membuat crash
           tryPlayCandidate(index + 1);
         });
       }
@@ -720,13 +754,14 @@ export function playSmartMcAudio(
 
 /**
  * Alias kompatibilitas untuk pemanggilan Smart MC di KaraokeContext
- * (Sepenuhnya menggunakan HTML5 new Audio('/sounds/...') & audioFx, BUKAN window.speechSynthesis).
+ * (Sepenuhnya menggunakan HTML5 new Audio(...) + /api/tts fallback, BUKAN window.speechSynthesis).
  */
 export function speakSmartMcIndonesian(
   tierOrText: SmartMcTier | string,
   onStart?: () => void,
-  onEnd?: () => void
+  onEnd?: () => void,
+  speechText?: string
 ): void {
-  playSmartMcAudio(tierOrText, onStart, onEnd);
+  playSmartMcAudio(tierOrText, onStart, onEnd, speechText);
 }
 

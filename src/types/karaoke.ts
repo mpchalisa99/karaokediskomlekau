@@ -98,18 +98,73 @@ export interface SongScoreData {
   isJuryAverage?: boolean;
 }
 
-export function getScoreQuote(score: number): string {
+export type ConnectionStatus = 'connected' | 'reconnecting' | 'disconnected';
+
+const SCORE_QUOTE_TIERS: Record<number, string[]> = {
+  10: [
+    'Signal suara hilang dari radar! Mic minta izin pulang ke markas!',
+    'Menggetarkan kaca tetangga — mode pemanasan ekstrim!',
+    'Frekuensi darurat! Warga sekitar siap evakuasi telinga!',
+  ],
+  20: [
+    'Pantang mundur walau hancur, kaca tetangga ikut bergetar!',
+    'Mode pemanasan berat! Yang penting niat dan nyali tetap komando!',
+    'Radar menangkap suara penuh perjuangan, tetap semangat prajurit!',
+  ],
+  30: [
+    'Penuh penghayatan meski nada masih merdeka ke segala arah!',
+    'Nada ke utara, suara ke selatan — kompas vokal perlu kalibrasi!',
+    'Anti-mainstream sejati! Musik ke kiri, vokal terbang ke kanan!',
+  ],
+  40: [
+    'Lumayan buat uji nyali telinga, penuh penghayatan meski nada bebas merdeka!',
+    'Vokal eksperimental tingkat lanjut — unik dan penuh keberanian!',
+    'Bikin komandan tersenyum penuh makna, lanjutkan latihan!',
+  ],
+  50: [
+    'Aman terkendali di jalur tengah, bikin tetangga standby nelpon damkar!',
+    'Setengah jalan menuju panggung juara, napas masih hemat kuota!',
+    'Stabil di zona aman — sedikit lagi tembus batas kecepatan suara!',
+  ],
+  60: [
+    'Aman terkendali di jalur tengah! Nada pas, gaya tetap gagah!',
+    'Sudah mulai terdeteksi radar merdu, tinggal tambah power dikit!',
+    'Penampilan solid kelas prajurit, bikin suasana makin hangat!',
+  ],
+  70: [
+    'Mulai bikin seisi ruangan ikut bergoyang! Bintang konser panggung!',
+    'Vokal mantap mengudara! Penonton mulai rebutan tepuk tangan!',
+    'Goyang terus komando! Irama masuk, penghayatan tembus!',
+  ],
+  80: [
+    'Lolos audisi tingkat markas! Mulai bikin seisi ruangan ikut bergoyang!',
+    'Suara jernih sejernih layar radar! Siap jadi andalan panggung!',
+    'Penampilan berkelas, seluruh ruangan langsung ikut bernyanyi!',
+  ],
+  90: [
+    'Hampir sempurna seperti rekaman studio! Suara dahsyat, TV mau retak!',
+    'Kualitas audio HD! Dewan juri langsung angkat jempol dua!',
+    'Nyaris tanpa celah! Bisa bikin penyanyi aslinya ketar-ketir!',
+  ],
+  100: [
+    'Legenda panggung Diskomlekau! Penyanyi dadakan resmi naik pangkat!',
+    'Fix penyanyi asli nyamar! Nilai mutlak 100, langsung masuk hall of fame!',
+    'Puncak kejayaan vokal TNI AU! Satu kompi langsung standing ovation!',
+  ],
+};
+
+export function getScoreQuote(score: number, seed?: string | number): string {
   const s = Math.max(0, Math.min(100, Math.round(score)));
-  if (s <= 10) return 'Mic trauma minta resign!';
-  if (s <= 20) return 'Pantang mundur walau hancur!';
-  if (s <= 30) return 'Nada ke utara, suara ke selatan.';
-  if (s <= 40) return 'Lumayan buat uji nyali telinga.';
-  if (s <= 50) return 'Bikin tetangga panik nelpon damkar!';
-  if (s <= 60) return 'Nada pas, tapi napas ngos-ngosan.';
-  if (s <= 70) return 'Bintang konser kamar mandi.';
-  if (s <= 80) return 'Lolos audisi tingkat RT!';
-  if (s <= 90) return 'Suara dahsyat, TV mau retak!';
-  return 'Fix, penyanyi asli nyamar!';
+  const tier = Math.min(100, Math.max(10, Math.round(s / 10) * 10));
+  const pool = SCORE_QUOTE_TIERS[tier] || SCORE_QUOTE_TIERS[80];
+  let offset = s;
+  if (seed !== undefined) {
+    const str = String(seed);
+    for (let i = 0; i < str.length; i++) {
+      offset = (offset * 31 + str.charCodeAt(i)) >>> 0;
+    }
+  }
+  return pool[offset % pool.length];
 }
 
 export type SmartMcTier = 'low' | 'medium' | 'high' | 'manual';
@@ -131,6 +186,9 @@ export interface SmartMcAnnouncement {
 }
 
 export type WebSocketMessageType =
+  | 'PING'
+  | 'PONG'
+  | 'HEARTBEAT'
   | 'CLIENT_CONNECTED'
   | 'JOIN_ROOM'
   | 'INIT_STATE'
