@@ -831,9 +831,15 @@ export async function searchYouTube(
 
   const finalQuery = buildKaraokeQuery(trimmed, suffix);
 
-  // 2. Server proxy search route
+  // 2. Server proxy search route with 10-second AbortController timeout
   try {
-    const resp = await fetch(`/api/search?q=${encodeURIComponent(finalQuery)}`);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000);
+    const resp = await fetch(`/api/search?q=${encodeURIComponent(finalQuery)}`, {
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+
     if (resp.ok) {
       const data = await resp.json();
       if (data.success && Array.isArray(data.songs) && data.songs.length > 0) {
@@ -849,7 +855,7 @@ export async function searchYouTube(
       }
     }
   } catch (err) {
-    console.warn('Backend proxy search encountered an issue, trying Invidious fallback:', err);
+    console.warn('Backend proxy search timeout or network error, trying Invidious fallback:', err);
   }
 
   // 3. Invidious mirror fallback

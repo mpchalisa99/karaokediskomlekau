@@ -1135,22 +1135,33 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
       // If suffixFilter === 'none', do NOT append suffix (allows searching ALL YouTube videos)
 
       try {
-        const response = await fetch(`/api/search?q=${encodeURIComponent(finalQuery)}`);
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 10000);
+        const response = await fetch(`/api/search?q=${encodeURIComponent(finalQuery)}`, {
+          signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+
         const data = await response.json();
 
         if (data.success && Array.isArray(data.songs) && data.songs.length > 0) {
           setSearchResults(data.songs);
+          setSearchError(null);
         } else {
           const lower = q.toLowerCase();
           const allCurated = Object.values(CURATED_LIBRARY).flat();
           const filtered = allCurated.filter(
             (s) => s.title.toLowerCase().includes(lower) || s.channelTitle.toLowerCase().includes(lower)
           );
-          setSearchResults(filtered.length > 0 ? filtered : (CURATED_LIBRARY['hits-indonesia'] || CURATED_LIBRARY['slow-rock']));
+          const fallbackSongs = filtered.length > 0 ? filtered : (CURATED_LIBRARY['hits-indonesia'] || CURATED_LIBRARY['slow-rock']);
+          setSearchResults(fallbackSongs);
+          setSearchError('Pencarian kosong. Menampilkan koleksi lagu favorit.');
+          showToast('⚠️ Lagu tidak ditemukan, menampilkan koleksi pilihan.');
         }
       } catch (err) {
-        setSearchError('Pencarian dialihkan ke koleksi lagu.');
+        setSearchError('Koneksi pencarian lambat/gagal. Menampilkan koleksi lagu.');
         setSearchResults(CURATED_LIBRARY['hits-indonesia'] || CURATED_LIBRARY['slow-rock']);
+        showToast('⚠️ Waktu pencarian habis, menampilkan lagu favorit.');
       } finally {
         setIsSearching(false);
       }
