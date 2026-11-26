@@ -175,22 +175,19 @@ export const KaraokeProvider: React.FC<{ children: React.ReactNode; initialIsTvM
     return stored.trim().toUpperCase();
   });
 
-  // Player & Queue State
+  // Player & Queue State - Selalu mulai kosong (Standby) saat pertama online hingga ada lagu yang dipilih/diputar
   const [currentSong, setCurrentSong] = useState<Song | null>(() => {
     try {
-      const saved = localStorage.getItem(STORAGE_KEYS.CURRENT);
-      return saved ? JSON.parse(saved) : null;
-    } catch {
-      return null;
-    }
+      localStorage.removeItem(STORAGE_KEYS.CURRENT);
+      localStorage.removeItem('karaoke_current_singer_v1');
+    } catch {}
+    return null;
   });
-  const [currentSingerName, setCurrentSingerName] = useState<string | null>(() => {
-    try {
-      return localStorage.getItem('karaoke_current_singer_v1') || null;
-    } catch {
-      return null;
-    }
-  });
+  const [currentSingerName, setCurrentSingerName] = useState<string | null>(null);
+  const currentSongRef = useRef<Song | null>(null);
+  useEffect(() => {
+    currentSongRef.current = currentSong;
+  }, [currentSong]);
   const currentSingerNameRef = useRef<string | null>(currentSingerName);
   const setTrackedCurrentSinger = useCallback((name: string | null | undefined) => {
     const clean = name && name.trim() ? name.trim() : null;
@@ -427,21 +424,17 @@ export const KaraokeProvider: React.FC<{ children: React.ReactNode; initialIsTvM
     }
   }, [activeCategory, searchQuery]);
 
-  // Auto-refresh Favorit Hits Indonesia di latar belakang jika cache kosong atau lebih dari 6 jam
+  // Auto-refresh Favorit Hits Indonesia secara otomatis setiap aplikasi dijalankan
   useEffect(() => {
-    const last = getHitsIndonesiaLastUpdated();
-    const sixHours = 6 * 60 * 60 * 1000;
-    if (!last || Date.now() - last > sixHours) {
-      refreshIndonesianTrendingHits()
-        .then((res) => {
-          setHitsIndonesiaSongs(res.songs);
-          setHitsLastUpdated(res.updatedAt);
-          if (activeCategory === 'hits-indonesia' && !searchQuery.trim()) {
-            setSearchResults(res.songs);
-          }
-        })
-        .catch(() => {});
-    }
+    refreshIndonesianTrendingHits()
+      .then((res) => {
+        setHitsIndonesiaSongs(res.songs);
+        setHitsLastUpdated(res.updatedAt);
+        if (activeCategory === 'hits-indonesia' && !searchQuery.trim()) {
+          setSearchResults(res.songs);
+        }
+      })
+      .catch(() => {});
   }, []);
 
   // Dewan Juri Prajurit (Multi-Client Collaborative Scoring)
@@ -522,6 +515,16 @@ export const KaraokeProvider: React.FC<{ children: React.ReactNode; initialIsTvM
   const isHydratedRef = useRef<boolean>(false);
   const isServerUpdateRef = useRef<boolean>(false);
   const lastLocalActionTimeRef = useRef<number>(0);
+  const processedSyncIdsRef = useRef<Set<string>>(new Set());
+
+  const markSyncIdProcessed = useCallback((id?: string | null) => {
+    if (!id) return;
+    processedSyncIdsRef.current.add(id);
+    if (processedSyncIdsRef.current.size > 120) {
+      const oldest = processedSyncIdsRef.current.values().next().value;
+      if (oldest) processedSyncIdsRef.current.delete(oldest);
+    }
+  }, []);
 
   const applyServerCurrentSong = useCallback((nextSong: Song | null | undefined) => {
     if (!nextSong || !nextSong.id) return;
@@ -812,7 +815,13 @@ export const KaraokeProvider: React.FC<{ children: React.ReactNode; initialIsTvM
               case 'ADD_QUEUE_ITEM': {
                 const item = data.payload?.item;
                 const sender = data.payload?.senderName || 'Prajurit (HP)';
+                if (item?.queueId) markSyncIdProcessed(item.queueId);
+                if (item?.requestId) markSyncIdProcessed(item.requestId);
                 if (Array.isArray(data.payload?.queue)) {
+                  data.payload.queue.forEach((q: any) => {
+                    if (q?.queueId) markSyncIdProcessed(q.queueId);
+                    if (q?.requestId) markSyncIdProcessed(q.requestId);
+                  });
                   setQueue(data.payload.queue);
                 } else if (item && item.song) {
                   setQueue((prev) => {
@@ -1139,20 +1148,36 @@ export const KaraokeProvider: React.FC<{ children: React.ReactNode; initialIsTvM
               if (Array.isArray(data.payload?.clients)) {
                 applyServerClients(data.payload.clients);
               }
-            } else if (data.type === 'TRIGGER_SMART_MC') {
+            } else if (data.type === 'SHOW_PANTUN' || data.type === 'TRIGGER_SMART_MC') {
               const incomingId = data.payload?.announcement?.id;
               const alreadyHandled = Boolean(incomingId && processedMcIdsRef.current.has(incomingId));
               if (!alreadyHandled && !isMcSpeakingRef.current && !isSmartMcPlaying()) {
                 const sender = data.payload?.senderName || data.payload?.singerName || 'Prajurit (HP)';
+                const singer = data.payload?.namaVokalis || data.payload?.singerName || currentSingerNameRef.current || defaultSingerName;
+                const song = data.payload?.judulLagu || data.payload?.songTitle || currentSong?.title;
+                let announcement = data.payload?.announcement
+                  ? { ...data.payload.announcement, isManual: true }
+                  : generateSmartMcAnnouncement({
+                      singerName: singer,
+                      songTitle: song,
+                      score: typeof data.payload?.score === 'number' ? data.payload.score : undefined,
+                      forceTier: data.payload?.forceTier,
+                      triggeredBy: sender,
+                      isManual: true,
+                    });
+                if (data.payload?.sampiran) announcement.sampiran = data.payload.sampiran;
+                if (data.payload?.isi) announcement.isi = data.payload.isi;
+                if (data.payload?.komentar) announcement.komentar = data.payload.komentar;
+                announcement.namaVokalis = singer;
+                announcement.judulLagu = song;
+                setIsSmartMcVisible(true);
                 triggerSmartMcRef.current({
-                  singerName: data.payload?.singerName || currentSingerNameRef.current || defaultSingerName,
-                  songTitle: data.payload?.songTitle || currentSong?.title,
+                  singerName: singer,
+                  songTitle: song,
                   score: typeof data.payload?.score === 'number' ? data.payload.score : undefined,
                   forceTier: data.payload?.forceTier,
                   triggeredBy: sender,
-                  announcement: data.payload?.announcement
-                    ? { ...data.payload.announcement, isManual: true }
-                    : undefined,
+                  announcement,
                   isManual: true,
                   broadcast: false,
                 });
@@ -1191,8 +1216,165 @@ export const KaraokeProvider: React.FC<{ children: React.ReactNode; initialIsTvM
     window.addEventListener('focus', handleWakeReconnect);
     window.addEventListener('pageshow', handleWakeReconnect);
 
-    // Lightweight fallback state check every 4 seconds (zero re-render when state is unchanged)
-    const pollTimer = setInterval(fetchRoomState, 4000);
+    // Polling ke /api/room-sync?room=ROOM_ID setiap 1,5 detik untuk sinkronisasi andal di Vercel & Smart TV Samsung (Tizen OS)
+    const pollRoomSync = async () => {
+      try {
+        const res = await fetch(`/api/room-sync?room=${encodeURIComponent(roomId)}`, {
+          cache: 'no-store',
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!data?.success || !data?.room) return;
+        setConnectionStatus('connected');
+
+        const serverRoom = data.room;
+        const isRecentLocalAction = Date.now() - lastLocalActionTimeRef.current < 2000;
+
+        // 1. Gabungkan antrean baru dari /api/room-sync tanpa duplikat atau lagu yang sudah diproses
+        const rawServerQueue: any[] = Array.isArray(serverRoom.queue) ? serverRoom.queue : [];
+        const freshItems = rawServerQueue.filter((item) => {
+          if (!item?.song?.id) return false;
+          if (item.queueId && processedSyncIdsRef.current.has(item.queueId)) return false;
+          if (item.requestId && processedSyncIdsRef.current.has(item.requestId)) return false;
+          return true;
+        });
+
+        if (!isRecentLocalAction && freshItems.length > 0) {
+          if (!currentSongRef.current) {
+            // Jika layar TV masih kosong & belum ada lagu diputar, langsung putar lagu pertama lalu masukkan sisanya ke antrean
+            const [firstItem, ...restItems] = freshItems;
+            markSyncIdProcessed(firstItem.queueId);
+            markSyncIdProcessed(firstItem.requestId);
+            restItems.forEach((it) => {
+              markSyncIdProcessed(it.queueId);
+              markSyncIdProcessed(it.requestId);
+            });
+
+            if (firstItem?.song?.id) {
+              const firstSinger = firstItem.singerName || defaultSingerName;
+              isServerUpdateRef.current = true;
+              currentSongRef.current = firstItem.song;
+              setCurrentSong(firstItem.song);
+              setTrackedCurrentSinger(firstSinger);
+              setIsPlaying(true);
+
+              if (restItems.length > 0) {
+                setQueue((prev) => {
+                  const next = [...prev];
+                  for (const rItem of restItems) {
+                    const dup = next.some(
+                      (q) =>
+                        q.queueId === rItem.queueId ||
+                        (rItem.requestId && (q as any).requestId === rItem.requestId)
+                    );
+                    if (!dup) {
+                      if (rItem.priority) next.unshift(rItem);
+                      else next.push(rItem);
+                    }
+                  }
+                  return next;
+                });
+              }
+
+              // Tandai item pertama sudah dikonsumsi oleh Master TV di /api/room-sync
+              fetch('/api/room-sync', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  roomId,
+                  action: 'PLAY_NOW',
+                  song: firstItem.song,
+                  singerName: firstSinger,
+                  consumedQueueId: firstItem.queueId,
+                }),
+              }).catch(() => {});
+
+              audioFx.playDing();
+              addRemoteNotification(
+                `📱 ${firstSinger} memutar lagu "${(firstItem.song.title || '').slice(0, 28)}..."`,
+                firstSinger,
+                'success'
+              );
+
+              if (!isMcSpeakingRef.current && !isSmartMcPlaying()) {
+                setTimeout(() => {
+                  triggerSmartMcRef.current({
+                    singerName: firstSinger,
+                    songTitle: firstItem.song.title,
+                    isManual: true,
+                    broadcast: true,
+                  });
+                }, 350);
+              }
+            }
+          } else {
+            const addedTitles: { title: string; singer: string }[] = [];
+            setQueue((prev) => {
+              const next = [...prev];
+              let changed = false;
+              for (const item of freshItems) {
+                markSyncIdProcessed(item.queueId);
+                markSyncIdProcessed(item.requestId);
+                const alreadyExists = next.some(
+                  (q) =>
+                    q.queueId === item.queueId ||
+                    (item.requestId && (q as any).requestId === item.requestId) ||
+                    (q.song?.id === item.song.id && q.singerName === item.singerName && Math.abs((q.addedAt || 0) - (item.addedAt || 0)) < 3000)
+                );
+                if (!alreadyExists) {
+                  if (item.priority) next.unshift(item);
+                  else next.push(item);
+                  changed = true;
+                  addedTitles.push({ title: item.song.title || 'Lagu baru', singer: item.singerName || 'Prajurit (HP)' });
+                }
+              }
+              if (changed) isServerUpdateRef.current = true;
+              return changed ? next : prev;
+            });
+
+            if (addedTitles.length > 0) {
+              audioFx.playDing();
+              const latestAdded = addedTitles[addedTitles.length - 1];
+              addRemoteNotification(
+                `📱 ${latestAdded.singer} menambahkan "${latestAdded.title.slice(0, 28)}..." ke antrean!`,
+                latestAdded.singer,
+                'success'
+              );
+            }
+          }
+        }
+
+        // 2. Sinkronisasi lagu yang sedang diputar jika TV masih kosong dan ada PLAY_NOW dari HP
+        const serverPlaying = serverRoom.nowPlaying || serverRoom.currentSong;
+        if (!isRecentLocalAction && !isPlayerEndedRef.current && !currentSongRef.current && serverPlaying?.id) {
+          isServerUpdateRef.current = true;
+          currentSongRef.current = serverPlaying;
+          applyServerCurrentSong(serverPlaying);
+          if (serverRoom.currentSinger !== undefined) {
+            setTrackedCurrentSinger(serverRoom.currentSinger);
+          }
+          setIsPlaying(true);
+        }
+
+        // 3. Sinkronisasi Pantun Smart MC dari /api/room-sync
+        if (serverRoom.isSmartMcVisible && serverRoom.activeMcAnnouncement?.id) {
+          const mcAnn = serverRoom.activeMcAnnouncement;
+          if (!processedMcIdsRef.current.has(mcAnn.id) && !isMcSpeakingRef.current && !isSmartMcPlaying()) {
+            setIsSmartMcVisible(true);
+            triggerSmartMcRef.current({
+              singerName: mcAnn.namaVokalis || mcAnn.singerName || currentSingerNameRef.current || defaultSingerName,
+              songTitle: mcAnn.judulLagu || mcAnn.songTitle || currentSongRef.current?.title,
+              announcement: { ...mcAnn, isManual: true },
+              isManual: true,
+              broadcast: false,
+            });
+          }
+        }
+      } catch {}
+    };
+
+    const pollTimer = setInterval(pollRoomSync, 1500);
+    const fullStatePollTimer = setInterval(fetchRoomState, 4000);
 
     return () => {
       isDisposed = true;
@@ -1202,12 +1384,13 @@ export const KaraokeProvider: React.FC<{ children: React.ReactNode; initialIsTvM
       window.removeEventListener('focus', handleWakeReconnect);
       window.removeEventListener('pageshow', handleWakeReconnect);
       clearInterval(pollTimer);
+      clearInterval(fullStatePollTimer);
       if (pingInterval) clearInterval(pingInterval);
       if (reconnectTimer) clearTimeout(reconnectTimer);
       if (socket) socket.close();
       if (sseSource) sseSource.close();
     };
-  }, [roomId, addRemoteNotification, applyServerCurrentSong, applyServerQueue, applyServerClients]);
+  }, [roomId, addRemoteNotification, applyServerCurrentSong, applyServerQueue, applyServerClients, defaultSingerName, setTrackedCurrentSinger]);
 
   // Broadcast Channel setup for instant multi-window / multi-screen sync on same browser
   useEffect(() => {
@@ -1298,16 +1481,32 @@ export const KaraokeProvider: React.FC<{ children: React.ReactNode; initialIsTvM
               });
             }
             break;
+          case 'SHOW_PANTUN':
           case 'TRIGGER_SMART_MC':
             if (!isMcSpeakingRef.current && !isSmartMcPlaying()) {
+              const singer = msg.payload?.namaVokalis || msg.payload?.singerName || currentSingerNameRef.current || defaultSingerName;
+              const song = msg.payload?.judulLagu || msg.payload?.songTitle || currentSong?.title;
+              let announcement = msg.payload?.announcement
+                ? { ...msg.payload.announcement, isManual: true }
+                : generateSmartMcAnnouncement({
+                    singerName: singer,
+                    songTitle: song,
+                    score: msg.payload?.score,
+                    forceTier: msg.payload?.forceTier,
+                    isManual: true,
+                  });
+              if (msg.payload?.sampiran) announcement.sampiran = msg.payload.sampiran;
+              if (msg.payload?.isi) announcement.isi = msg.payload.isi;
+              if (msg.payload?.komentar) announcement.komentar = msg.payload.komentar;
+              announcement.namaVokalis = singer;
+              announcement.judulLagu = song;
+              setIsSmartMcVisible(true);
               triggerSmartMcRef.current({
-                singerName: msg.payload?.singerName || currentSingerNameRef.current || defaultSingerName,
-                songTitle: msg.payload?.songTitle || currentSong?.title,
+                singerName: singer,
+                songTitle: song,
                 score: msg.payload?.score,
                 forceTier: msg.payload?.forceTier,
-                announcement: msg.payload?.announcement
-                  ? { ...msg.payload.announcement, isManual: true }
-                  : undefined,
+                announcement,
                 isManual: true,
                 broadcast: false,
               });
@@ -1391,6 +1590,17 @@ export const KaraokeProvider: React.FC<{ children: React.ReactNode; initialIsTvM
     },
     [broadcastMessage]
   );
+
+  // Helper to broadcast messages to all connected PeerJS mobile clients
+  const broadcastToPeers = useCallback((msg: PeerMessage) => {
+    peerConnectionsRef.current.forEach((conn) => {
+      if (conn.open) {
+        try {
+          conn.send(msg);
+        } catch {}
+      }
+    });
+  }, []);
 
   // Sound effects runner with on-screen visual reaction (HUUU, Cheer, Applause, etc.)
   const triggerSoundFx = useCallback(
@@ -1672,6 +1882,7 @@ export const KaraokeProvider: React.FC<{ children: React.ReactNode; initialIsTvM
     (song: Song, singerName?: string, playNext = false, customQueueId?: string) => {
       const sName = singerName?.trim() || defaultSingerName;
       const qId = customQueueId?.trim() || `q-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+      markSyncIdProcessed(qId);
       const newItem: QueueItem = {
         queueId: qId,
         song,
@@ -1680,42 +1891,80 @@ export const KaraokeProvider: React.FC<{ children: React.ReactNode; initialIsTvM
         priority: playNext,
       };
 
-      setQueue((prev) => {
-        // Prevent duplicate queueId or exact same song+singer within 3 seconds
-        if (
-          prev.some(
-            (q) =>
-              q.queueId === qId ||
-              (q.song.id === song.id && q.singerName === sName && Date.now() - (q.addedAt || 0) < 3000)
-          )
-        ) {
-          return prev;
-        }
-        if (playNext) {
-          return [newItem, ...prev];
-        }
-        return [...prev, newItem];
-      });
-
-      if (!currentSong) {
+      const isScreenIdle = !currentSongRef.current;
+      if (isScreenIdle) {
+        unlockSmartMcAudio();
+        currentSongRef.current = song;
         setCurrentSong(song);
         setTrackedCurrentSinger(sName);
         setIsPlaying(true);
+
+        broadcastMessage('PLAY_NOW', { song, singerName: sName });
+        fetch(`/api/room/${encodeURIComponent(roomId)}/play-now`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ song, singerName: sName }),
+        }).catch(() => {});
+        fetch('/api/room-sync', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ roomId, action: 'PLAY_NOW', song, singerName: sName, consumedQueueId: qId }),
+        }).catch(() => {});
+
+        setTimeout(() => {
+          triggerSmartMcRef.current({
+            singerName: sName,
+            songTitle: song.title,
+            isManual: true,
+            broadcast: true,
+          });
+        }, 350);
+      } else {
+        setQueue((prev) => {
+          if (
+            prev.some(
+              (q) =>
+                q.queueId === qId ||
+                (q.song.id === song.id && q.singerName === sName && Date.now() - (q.addedAt || 0) < 3000)
+            )
+          ) {
+            return prev;
+          }
+          if (playNext) {
+            return [newItem, ...prev];
+          }
+          return [...prev, newItem];
+        });
+
+        broadcastMessage('ADD_QUEUE_ITEM', { item: newItem, song, singerName: sName, priority: playNext, queueId: qId });
+        fetch(`/api/room/${encodeURIComponent(roomId)}/queue`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ song, singerName: sName, priority: playNext, queueId: qId }),
+        }).catch(() => {});
+        fetch('/api/room-sync', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            roomId,
+            action: 'ADD_QUEUE',
+            song,
+            singerName: sName,
+            priority: playNext,
+            queueId: qId,
+            requestId: qId,
+          }),
+        }).catch(() => {});
       }
 
-      broadcastMessage('ADD_QUEUE_ITEM', { item: newItem, song, singerName: sName, priority: playNext, queueId: qId });
-      fetch(`/api/room/${encodeURIComponent(roomId)}/queue`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ song, singerName: sName, priority: playNext, queueId: qId }),
-      }).catch(() => {});
       audioFx.playDing();
     },
-    [defaultSingerName, broadcastMessage, roomId, currentSong, setTrackedCurrentSinger]
+    [defaultSingerName, broadcastMessage, roomId, setTrackedCurrentSinger, markSyncIdProcessed]
   );
 
   // Remove from Queue
   const removeFromQueue = useCallback((queueId: string) => {
+    markSyncIdProcessed(queueId);
     setQueue((prev) => prev.filter((item) => item.queueId !== queueId));
     broadcastMessage('REMOVE_QUEUE_ITEM', { queueId });
     fetch(`/api/room/${encodeURIComponent(roomId)}/remove`, {
@@ -1723,7 +1972,12 @@ export const KaraokeProvider: React.FC<{ children: React.ReactNode; initialIsTvM
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ queueId }),
     }).catch(() => {});
-  }, [broadcastMessage, roomId]);
+    fetch('/api/room-sync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ roomId, action: 'REMOVE_QUEUE', queueId }),
+    }).catch(() => {});
+  }, [broadcastMessage, roomId, markSyncIdProcessed]);
 
   // Reorder Queue
   const moveQueueItem = useCallback(
@@ -1787,6 +2041,7 @@ export const KaraokeProvider: React.FC<{ children: React.ReactNode; initialIsTvM
   const playSongNow = useCallback(
     (song: Song, singerName?: string) => {
       const sName = singerName || defaultSingerName;
+      unlockSmartMcAudio();
       clearSmartMcImmediately();
       isPlayerEndedRef.current = false;
       setIsPlayerEnded(false);
@@ -1795,6 +2050,7 @@ export const KaraokeProvider: React.FC<{ children: React.ReactNode; initialIsTvM
       if (currentSong) {
         setHistory((prev) => [currentSong, ...prev.slice(0, 19)]);
       }
+      currentSongRef.current = song;
       setCurrentSong(song);
       setTrackedCurrentSinger(sName);
       setIsPlaying(true);
@@ -1836,6 +2092,11 @@ export const KaraokeProvider: React.FC<{ children: React.ReactNode; initialIsTvM
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ song, singerName: sName }),
       }).catch(() => {});
+      fetch('/api/room-sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ roomId, action: 'PLAY_NOW', song, singerName: sName }),
+      }).catch(() => {});
 
       // Pemicu otomatis kartu SMART MC DISKOMLEKAU saat lagu baru mulai diputar di TV
       setTimeout(() => {
@@ -1861,6 +2122,7 @@ export const KaraokeProvider: React.FC<{ children: React.ReactNode; initialIsTvM
         return;
       }
       lastSkipTimestampRef.current = now;
+      unlockSmartMcAudio();
 
       if (endTransitionTimerRef.current) {
         clearTimeout(endTransitionTimerRef.current);
@@ -1874,6 +2136,7 @@ export const KaraokeProvider: React.FC<{ children: React.ReactNode; initialIsTvM
           if (currentSong) {
             setHistory((prevHist) => [currentSong, ...prevHist.slice(0, 19)]);
           }
+          currentSongRef.current = null;
           setCurrentSong(null);
           setTrackedCurrentSinger(null);
           isPlayingRef.current = false;
@@ -1889,11 +2152,17 @@ export const KaraokeProvider: React.FC<{ children: React.ReactNode; initialIsTvM
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ singerName: defaultSingerName }),
             }).catch(() => {});
+            fetch('/api/room-sync', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ roomId, action: 'STOP_IDLE' }),
+            }).catch(() => {});
           }
           return [];
         }
         const [nextItem, ...remaining] = prevQueue;
         const nextSinger = nextItem.singerName || defaultSingerName;
+        markSyncIdProcessed(nextItem.queueId);
         // Larangan Mutlak di Tengah Lagu: Saat lagu berikutnya mulai diputar, sembunyikan Smart MC & hentikan suara
         clearSmartMcImmediately();
         isPlayerEndedRef.current = false;
@@ -1907,6 +2176,7 @@ export const KaraokeProvider: React.FC<{ children: React.ReactNode; initialIsTvM
         if (currentSong) {
           setHistory((prevHist) => [currentSong, ...prevHist.slice(0, 19)]);
         }
+        currentSongRef.current = nextItem.song;
         setCurrentSong(nextItem.song);
         setTrackedCurrentSinger(nextSinger);
         setIsPlaying(true);
@@ -1950,6 +2220,17 @@ export const KaraokeProvider: React.FC<{ children: React.ReactNode; initialIsTvM
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ singerName: nextSinger, nextSong: nextItem.song, queueId: nextItem.queueId }),
           }).catch(() => {});
+          fetch('/api/room-sync', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              roomId,
+              action: 'PLAY_NOW',
+              song: nextItem.song,
+              singerName: nextSinger,
+              consumedQueueId: nextItem.queueId,
+            }),
+          }).catch(() => {});
         }
 
         // Pemicu otomatis kartu SMART MC DISKOMLEKAU saat lagu berikutnya mulai diputar di TV
@@ -1965,7 +2246,7 @@ export const KaraokeProvider: React.FC<{ children: React.ReactNode; initialIsTvM
         return remaining;
       });
     },
-    [currentSong, broadcastMessage, roomId, defaultSingerName, playerRef, isMuted, audioVolume, clearSmartMcImmediately, setTrackedCurrentSinger]
+    [currentSong, broadcastMessage, roomId, defaultSingerName, playerRef, isMuted, audioVolume, clearSmartMcImmediately, setTrackedCurrentSinger, markSyncIdProcessed]
   );
 
   // Toggle Play / Pause synchronized across TV, Tablet, and Mobile
@@ -2612,17 +2893,6 @@ export const KaraokeProvider: React.FC<{ children: React.ReactNode; initialIsTvM
     return () => clearInterval(ticker);
   }, [isPlaying, currentSong?.id, getSongDurationSeconds]);
 
-  // Helper to broadcast messages to all connected PeerJS mobile clients
-  const broadcastToPeers = useCallback((msg: PeerMessage) => {
-    peerConnectionsRef.current.forEach((conn) => {
-      if (conn.open) {
-        try {
-          conn.send(msg);
-        } catch {}
-      }
-    });
-  }, []);
-
   // Broadcast TV status update to all connected PeerJS mobile clients whenever song or queue changes
   useEffect(() => {
     const msg: PeerMessage = {
@@ -2880,20 +3150,37 @@ export const KaraokeProvider: React.FC<{ children: React.ReactNode; initialIsTvM
                 }
                 break;
 
+              case 'SHOW_PANTUN':
               case 'TRIGGER_SMART_MC': {
                 const incomingId = data.payload?.announcement?.id;
                 const alreadyHandled = Boolean(incomingId && processedMcIdsRef.current.has(incomingId));
                 if (!alreadyHandled && !isMcSpeakingRef.current && !isSmartMcPlaying()) {
                   const sender = data.senderName || data.payload?.singerName || 'Prajurit (HP)';
+                  const singer = data.payload?.namaVokalis || data.payload?.singerName || currentSingerNameRef.current || defaultSingerName;
+                  const song = data.payload?.judulLagu || data.payload?.songTitle || currentSong?.title;
+                  let announcement = data.payload?.announcement
+                    ? { ...data.payload.announcement, isManual: true }
+                    : generateSmartMcAnnouncement({
+                        singerName: singer,
+                        songTitle: song,
+                        score: data.payload?.score,
+                        forceTier: data.payload?.forceTier,
+                        triggeredBy: sender,
+                        isManual: true,
+                      });
+                  if (data.payload?.sampiran) announcement.sampiran = data.payload.sampiran;
+                  if (data.payload?.isi) announcement.isi = data.payload.isi;
+                  if (data.payload?.komentar) announcement.komentar = data.payload.komentar;
+                  announcement.namaVokalis = singer;
+                  announcement.judulLagu = song;
+                  setIsSmartMcVisible(true);
                   triggerSmartMcRef.current({
-                    singerName: data.payload?.singerName || currentSingerNameRef.current || defaultSingerName,
-                    songTitle: data.payload?.songTitle || currentSong?.title,
+                    singerName: singer,
+                    songTitle: song,
                     score: data.payload?.score,
                     forceTier: data.payload?.forceTier,
                     triggeredBy: sender,
-                    announcement: data.payload?.announcement
-                      ? { ...data.payload.announcement, isManual: true }
-                      : undefined,
+                    announcement,
                     isManual: true,
                     broadcast: false,
                   });
@@ -3110,6 +3397,8 @@ export const KaraokeProvider: React.FC<{ children: React.ReactNode; initialIsTvM
         getJuryAverageSummary,
         activeMcAnnouncement,
         isMcSpeaking,
+        isSmartMcVisible,
+        setIsSmartMcVisible,
         isPlayerEnded,
         triggerSmartMc,
         replaySmartMcSpeech,

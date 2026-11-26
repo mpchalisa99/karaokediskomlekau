@@ -587,12 +587,13 @@ export function generateSmartMcAnnouncement(options: GenerateSmartMcOptions = {}
 
 // Referensi global untuk elemen HTML5 <audio> Smart MC, session lock & timer penyelesaian
 let activeMcAudioRef: HTMLAudioElement | null = null;
+let unlockedAudioPoolEl: HTMLAudioElement | null = null;
 let fallbackSpeechTimerRef: ReturnType<typeof setTimeout> | null = null;
 let isMcAudioUnlocked = false;
 let isPlaybackActive = false;
 let activePlaybackSessionId = 0;
 
-// Tiny silent WAV data URI for unlocking HTML5 <audio> on Samsung Tizen OS / iOS / Android
+// Tiny silent WAV data URI for unlocking HTML5 <audio> on Samsung Tizen OS / Android TV / iOS
 const SILENT_UNLOCK_WAV =
   'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA';
 
@@ -604,14 +605,20 @@ export function isSmartMcPlaying(): boolean {
 }
 
 /**
- * Membuka kunci policy autoplay HTML5 <audio> saat interaksi pertama di layar TV Samsung / browser.
+ * Membuka kunci policy autoplay HTML5 <audio> saat interaksi pertama di layar TV Samsung / Android TV / browser.
+ * Menggunakan elemen HTMLAudioElement persisten agar pemanggilan async (WebSocket/PeerJS) tetap berbunyi.
  */
 export function unlockSmartMcAudio(): void {
-  if (typeof window === 'undefined' || isMcAudioUnlocked) return;
+  if (typeof window === 'undefined') return;
   try {
-    const unlockAudio = new Audio(SILENT_UNLOCK_WAV);
-    unlockAudio.volume = 0.01;
-    const p = unlockAudio.play();
+    if (!unlockedAudioPoolEl) {
+      unlockedAudioPoolEl = new Audio();
+      unlockedAudioPoolEl.preload = 'auto';
+    }
+    if (isMcAudioUnlocked) return;
+    unlockedAudioPoolEl.src = SILENT_UNLOCK_WAV;
+    unlockedAudioPoolEl.volume = 0.01;
+    const p = unlockedAudioPoolEl.play();
     if (p && typeof p.then === 'function') {
       p.then(() => {
         isMcAudioUnlocked = true;
@@ -625,29 +632,8 @@ export function unlockSmartMcAudio(): void {
 }
 
 /**
- * Daftar prioritas file MP3 lokal MC Wanita di folder /sounds/ untuk masing-masing kategori Smart MC.
- * Jika file MC Wanita spesifik belum tersedia di /public/sounds/, sistem otomatis memanggil
- * endpoint /api/tts (suara MC wanita bahasa Indonesia) lalu fallback ke file MP3 lokal yang tersedia.
+ * File MP3 lokal yang tersedia di /public/sounds/ sebagai cadangan offline.
  */
-export const SMART_MC_AUDIO_FILES: Record<SmartMcTier, string[]> = {
-  high: [
-    '/sounds/mc-wanita-pantun.mp3',
-    '/sounds/mc-wanita-komentar.mp3',
-  ],
-  medium: [
-    '/sounds/mc-wanita-pantun.mp3',
-    '/sounds/mc-wanita-komentar.mp3',
-  ],
-  low: [
-    '/sounds/mc-wanita-komentar.mp3',
-    '/sounds/mc-wanita-pantun.mp3',
-  ],
-  manual: [
-    '/sounds/mc-wanita-sapa.mp3',
-    '/sounds/mc-wanita-pantun.mp3',
-  ],
-};
-
 export const SMART_MC_OFFLINE_FALLBACK_FILES: Record<SmartMcTier, string[]> = {
   high: ['/sounds/mc-high.mp3', '/sounds/mc-pantun.mp3', '/sounds/cheer.mp3', '/sounds/applause.mp3'],
   medium: ['/sounds/mc-medium.mp3', '/sounds/mc-pantun.mp3', '/sounds/applause.mp3', '/sounds/cheer.mp3'],
@@ -655,8 +641,77 @@ export const SMART_MC_OFFLINE_FALLBACK_FILES: Record<SmartMcTier, string[]> = {
   manual: ['/sounds/mc-pantun.mp3', '/sounds/hormat.mp3', '/sounds/cheer.mp3', '/sounds/applause.mp3'],
 };
 
+function isTizenBrowser(): boolean {
+  if (typeof navigator === 'undefined') return false;
+  return /tizen|smart-tv|smarttv|samsung/i.test(navigator.userAgent || '');
+}
+
+function tryBrowserSpeechFallback(
+  text: string,
+  sessionId: number,
+  onDone: () => void,
+  onFailed: () => void
+): boolean {
+  if (
+    typeof window === 'undefined' ||
+    isTizenBrowser() ||
+    !('speechSynthesis' in window) ||
+    typeof SpeechSynthesisUtterance === 'undefined'
+  ) {
+    return false;
+  }
+
+  try {
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = 'id-ID';
+    utterance.rate = 0.98;
+    utterance.pitch = 1.12;
+    utterance.volume = 1.0;
+
+    const voices = window.speechSynthesis.getVoices();
+    const indoFemale =
+      voices.find((v) => /id[-_]?id/i.test(v.lang) && /female|wanita|gadis|damayanti|putri|google/i.test(v.name)) ||
+      voices.find((v) => /id[-_]?id/i.test(v.lang));
+    if (indoFemale) {
+      utterance.voice = indoFemale;
+    }
+
+    let settled = false;
+    const finishSpeech = () => {
+      if (settled || sessionId !== activePlaybackSessionId) return;
+      settled = true;
+      onDone();
+    };
+
+    utterance.onend = finishSpeech;
+    utterance.onerror = () => {
+      if (settled || sessionId !== activePlaybackSessionId) return;
+      settled = true;
+      onFailed();
+    };
+    window.speechSynthesis.speak(utterance);
+
+    // Fallback check in case speechSynthesis silently drops on Android WebView
+    setTimeout(() => {
+      if (
+        !settled &&
+        sessionId === activePlaybackSessionId &&
+        !window.speechSynthesis.speaking &&
+        !window.speechSynthesis.pending
+      ) {
+        settled = true;
+        onFailed();
+      }
+    }, 900);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /**
- * Menghentikan pemutaran audio Smart MC yang sedang berjalan (HTML5 <audio>)
+ * Menghentikan pemutaran audio Smart MC yang sedang berjalan
  */
 export function stopSmartMcSpeech(): void {
   activePlaybackSessionId += 1;
@@ -671,20 +726,24 @@ export function stopSmartMcSpeech(): void {
       activeMcAudioRef.onended = null;
       activeMcAudioRef.onerror = null;
       activeMcAudioRef.pause();
-      activeMcAudioRef.src = '';
+      if (activeMcAudioRef !== unlockedAudioPoolEl) {
+        activeMcAudioRef.src = '';
+      }
     } catch {
       // Abaikan error saat menghentikan audio di Tizen OS
     }
     activeMcAudioRef = null;
   }
+  if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+    try {
+      window.speechSynthesis.cancel();
+    } catch {}
+  }
 }
 
 /**
- * Memutar suara MC Wanita yang merdu & ramah menggunakan HTML5 <audio> (`new Audio(...)`)
- * (100% TANPA window.speechSynthesis agar berjalan normal di Smart TV Samsung Tizen OS):
- * 1. Mencegah pantun/suara baru jika pantun sebelumnya masih aktif berjalan (anti-duplikasi).
- * 2. Menggunakan guard `attemptSettled` + `sessionId` agar kegagalan file (onerror + play().catch)
- *    tidak pernah bercabang menjadi 2 suara paralel.
+ * Memutar suara MC Wanita yang merdu & ramah menggunakan HTML5 <audio> (`/api/tts` terlebih dahulu)
+ * lalu fallback ke Web Speech API (non-Tizen) dan file MP3 lokal di `/public/sounds/`.
  */
 export function playSmartMcAudio(
   tierOrText: SmartMcTier | string = 'manual',
@@ -738,20 +797,39 @@ export function playSmartMcAudio(
     return;
   }
 
+  if (!unlockedAudioPoolEl) {
+    unlockedAudioPoolEl = new Audio();
+    unlockedAudioPoolEl.preload = 'auto';
+  }
+
   onStart?.();
 
-  // Susun rantai prioritas audio (1 jalur tunggal, berurutan tanpa paralel):
-  // 1) File MP3 lokal MC Wanita -> 2) Endpoint /api/tts suara Indonesia -> 3) MP3 fallback lokal
-  const localFemaleFiles = SMART_MC_AUDIO_FILES[resolvedTier] || SMART_MC_AUDIO_FILES.manual;
+  // Prioritaskan langsung endpoint /api/tts suara Indonesia agar tidak buang user-gesture pada file 404
   const ttsEndpoint = `/api/tts?text=${encodeURIComponent(resolvedText.slice(0, 260))}&tier=${encodeURIComponent(resolvedTier)}`;
   const offlineFallbacks = SMART_MC_OFFLINE_FALLBACK_FILES[resolvedTier] || SMART_MC_OFFLINE_FALLBACK_FILES.manual;
-  const candidateFiles = [...localFemaleFiles, ttsEndpoint, ...offlineFallbacks];
+  const candidateFiles = [ttsEndpoint, ...offlineFallbacks];
 
   // Safety timer agar status speaking & ducking selalu pulih tepat waktu
-  fallbackSpeechTimerRef = setTimeout(finishOnce, 14000);
+  fallbackSpeechTimerRef = setTimeout(finishOnce, 12000);
+
+  let speechAttempted = false;
 
   const tryPlayCandidate = (index: number) => {
     if (hasCompleted || sessionId !== activePlaybackSessionId) return;
+
+    // Jika /api/tts gagal, coba Web Speech API (bahasa Indonesia) terlebih dahulu sebelum jingle MP3
+    if (index === 1 && !speechAttempted) {
+      speechAttempted = true;
+      const startedSpeech = tryBrowserSpeechFallback(
+        resolvedText,
+        sessionId,
+        finishOnce,
+        () => tryPlayCandidate(1)
+      );
+      if (startedSpeech) {
+        return;
+      }
+    }
 
     if (index >= candidateFiles.length) {
       try {
@@ -765,7 +843,10 @@ export function playSmartMcAudio(
     let attemptSettled = false;
 
     try {
-      const audio = new Audio(src);
+      const audio = index === 0 && unlockedAudioPoolEl ? unlockedAudioPoolEl : new Audio();
+      audio.onended = null;
+      audio.onerror = null;
+      audio.src = src;
       audio.preload = 'auto';
       audio.volume = 1.0;
       activeMcAudioRef = audio;
@@ -777,7 +858,6 @@ export function playSmartMcAudio(
           audio.onended = null;
           audio.onerror = null;
           audio.pause();
-          audio.src = '';
         } catch {}
         if (activeMcAudioRef === audio) {
           activeMcAudioRef = null;
@@ -810,7 +890,6 @@ export function playSmartMcAudio(
 
 /**
  * Alias kompatibilitas untuk pemanggilan Smart MC di KaraokeContext
- * (Sepenuhnya menggunakan HTML5 new Audio(...) + /api/tts fallback, BUKAN window.speechSynthesis).
  */
 export function speakSmartMcIndonesian(
   tierOrText: SmartMcTier | string,

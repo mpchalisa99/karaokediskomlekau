@@ -1076,6 +1076,7 @@ async function startServer() {
 
   // Vercel-compatible /api/room-sync endpoint for Smart TV Samsung (Tizen OS) & Android TV 13
   app.get('/api/room-sync', (req, res) => {
+    res.setHeader('Cache-Control', 'no-store, max-age=0');
     const rawRoom = (req.query.room || req.query.roomId || 'ROOM-1001') as string;
     const room = getOrCreateRoom(rawRoom);
     return res.json({
@@ -1102,18 +1103,26 @@ async function startServer() {
   });
 
   app.post('/api/room-sync', (req, res) => {
+    res.setHeader('Cache-Control', 'no-store, max-age=0');
     const body = req.body || {};
-    const { roomId, action, song, singerName, priority, queueId, payload, announcement } = body;
+    const { roomId, action, song, singerName, priority, queueId, requestId, consumedQueueId, payload, announcement } = body;
     const room = getOrCreateRoom(roomId || payload?.roomId);
     const cleanSinger = (singerName || payload?.singerName || 'Prajurit (HP)').trim();
     const now = Date.now();
 
     switch (action) {
       case 'ADD_QUEUE': {
-        if (!song || !song.id) {
+        const targetSong = song || payload?.song;
+        if (!targetSong || !targetSong.id) {
           return res.status(400).json({ success: false, error: 'Data lagu tidak valid' });
         }
-        const { item, isCurrent } = addSongToRoomQueue(room, song, cleanSinger, !!(priority || payload?.priority), queueId || payload?.queueId);
+        const { item, isCurrent } = addSongToRoomQueue(
+          room,
+          targetSong,
+          cleanSinger,
+          !!(priority || payload?.priority),
+          queueId || requestId || payload?.queueId || payload?.requestId
+        );
         return res.json({
           success: true,
           action,
@@ -1132,15 +1141,20 @@ async function startServer() {
       }
 
       case 'PLAY_NOW': {
-        if (song && song.id) {
-          room.currentSong = song;
+        const targetSong = song || payload?.song;
+        const consumedId = consumedQueueId || queueId || payload?.consumedQueueId || payload?.queueId;
+        if (consumedId) {
+          room.queue = room.queue.filter((q) => q.queueId !== consumedId);
+        }
+        if (targetSong && targetSong.id) {
+          room.currentSong = targetSong;
           room.currentSinger = cleanSinger;
           room.isPlaying = true;
           room.lastUpdated = now;
           broadcastToRoom(room, {
             type: 'PLAY_NOW',
             roomId: room.roomId,
-            payload: { song, singerName: cleanSinger },
+            payload: { song: targetSong, singerName: cleanSinger },
             timestamp: now,
           });
           broadcastToRoom(room, {
@@ -1159,14 +1173,42 @@ async function startServer() {
         break;
       }
 
+      case 'STOP_IDLE': {
+        room.currentSong = null;
+        room.currentSinger = null;
+        room.isPlaying = false;
+        room.lastUpdated = now;
+        break;
+      }
+
+      case 'REMOVE_QUEUE': {
+        const targetId = queueId || payload?.queueId;
+        if (targetId) {
+          room.queue = room.queue.filter((q) => q.queueId !== targetId);
+          room.lastUpdated = now;
+          broadcastToRoom(room, {
+            type: 'REMOVE_QUEUE_ITEM',
+            roomId: room.roomId,
+            payload: { queueId: targetId, queue: room.queue },
+            timestamp: now,
+          });
+        }
+        break;
+      }
+
       case 'SKIP_NEXT': {
-        if (room.queue.length > 0) {
-          const next = room.queue.shift();
-          if (next) {
-            room.currentSong = next.song;
-            room.currentSinger = next.singerName;
-            room.isPlaying = true;
-          }
+        const targetId = consumedQueueId || queueId || payload?.queueId;
+        let next: any;
+        if (targetId) {
+          next = room.queue.find((q) => q.queueId === targetId);
+          room.queue = room.queue.filter((q) => q.queueId !== targetId);
+        } else if (room.queue.length > 0) {
+          next = room.queue.shift();
+        }
+        if (next) {
+          room.currentSong = next.song;
+          room.currentSinger = next.singerName;
+          room.isPlaying = true;
         } else {
           room.currentSong = null;
           room.currentSinger = null;

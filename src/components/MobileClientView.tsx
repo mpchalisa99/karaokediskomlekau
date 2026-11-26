@@ -134,9 +134,8 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
     setJuryVotersList([]);
   }, [currentSong?.id]);
 
-  // Search State & Dynamic Hits Indonesia Trends
+  // Search & Dynamic Hits Indonesia Trends (auto-synced on startup)
   const [hitsIndoSongs, setHitsIndoSongs] = useState<Song[]>(() => getHitsIndonesiaSongs());
-  const [isRefreshingHits, setIsRefreshingHits] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [suffixFilter, setSuffixFilter] = useState<SuffixFilter>('karaoke');
   const [searchResults, setSearchResults] = useState<Song[]>(() => {
@@ -146,6 +145,18 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
   const [activeSearchCategory, setActiveSearchCategory] = useState<string | null>('hits-indonesia');
   const [isSearching, setIsSearching] = useState<boolean>(false);
   const [searchError, setSearchError] = useState<string | null>(null);
+
+  // Sinkronisasi Update Tren Hits Indonesia otomatis setiap aplikasi dijalankan
+  useEffect(() => {
+    refreshIndonesianTrendingHits()
+      .then((result) => {
+        setHitsIndoSongs(result.songs);
+        setSearchResults((prev) =>
+          activeSearchCategory === 'hits-indonesia' && !searchQuery.trim() ? result.songs : prev
+        );
+      })
+      .catch(() => {});
+  }, []);
 
   // Curated (List Pilihan) Tab State
   const [curatedCategoryFilter, setCuratedCategoryFilter] = useState<string>('hits-indonesia');
@@ -235,28 +246,6 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
     [roomId]
   );
 
-  // Refresh dynamic Indonesian YouTube trends (with localStorage cache)
-  const handleRefreshHits = useCallback(async () => {
-    if (isRefreshingHits) return;
-    setIsRefreshingHits(true);
-    try {
-      const result = await refreshIndonesianTrendingHits();
-      const updated = result.songs;
-      setHitsIndoSongs(updated);
-      if (activeSearchCategory === 'hits-indonesia' && !searchQuery.trim()) {
-        setSearchResults(updated);
-      }
-      showToast(
-        result.fromOnline
-          ? `🔥 Tren Hits Indonesia diperbarui dari YouTube (${updated.length} lagu)!`
-          : `✅ Daftar Hits Indonesia tersimpan (${updated.length} lagu).`
-      );
-    } catch {
-      showToast('⚠️ Gagal memuat tren terbaru, memakai daftar tersimpan.');
-    } finally {
-      setIsRefreshingHits(false);
-    }
-  }, [isRefreshingHits, activeSearchCategory, searchQuery, showToast]);
 
   const handleSetTvMusicDelay = useCallback(
     (val: number) => {
@@ -395,8 +384,9 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
     showToast(`Nama disimpan: ${clean}`);
   };
 
-  // Fetch initial room state and send HTTP heartbeat ping
+  // Fetch initial room state and send HTTP heartbeat ping (with Vercel /api/room-sync fallback)
   const fetchRoomState = useCallback(async () => {
+    let synced = false;
     try {
       const res = await fetch(`/api/room/${encodeURIComponent(roomId)}/ping`, {
         method: 'POST',
@@ -406,6 +396,7 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
       if (res.ok) {
         const data = await res.json();
         if (data.success && data.room) {
+          synced = true;
           lastSyncTime.current = Date.now();
           setIsConnected(true);
           setConnectionStatus('connected');
@@ -423,7 +414,38 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
           if (data.clientCount !== undefined) setClientCount(data.clientCount);
         }
       }
-    } catch {
+    } catch {}
+
+    if (!synced) {
+      try {
+        const syncRes = await fetch(`/api/room-sync?room=${encodeURIComponent(roomId)}`, {
+          cache: 'no-store',
+        });
+        if (syncRes.ok) {
+          const syncData = await syncRes.json();
+          if (syncData?.success && syncData?.room) {
+            synced = true;
+            lastSyncTime.current = Date.now();
+            setIsConnected(true);
+            setConnectionStatus('connected');
+            const r = syncData.room;
+            const playingSong = r.nowPlaying !== undefined ? r.nowPlaying : r.currentSong;
+            if (playingSong !== undefined) setCurrentSong(playingSong);
+            if (r.currentSinger !== undefined) setCurrentSinger(r.currentSinger);
+            if (typeof r.isPlaying === 'boolean') setIsPlaying(r.isPlaying);
+            if (typeof r.isMcSpeaking === 'boolean') setMcSpeakingLock(r.isMcSpeaking);
+            if (Array.isArray(r.queue)) setQueue(r.queue);
+            if (typeof r.musicVolume === 'number') setMusicVolume(r.musicVolume);
+            if (typeof r.isMuted === 'boolean') setIsMusicMuted(r.isMuted);
+            if (Array.isArray(r.juryVotes)) {
+              setJuryVotersList(r.juryVotes.map((v: any) => ({ juryName: v.juryName, score: v.score })));
+            }
+          }
+        }
+      } catch {}
+    }
+
+    if (!synced) {
       const elapsed = Date.now() - lastSyncTime.current;
       if (typeof navigator !== 'undefined' && navigator.onLine === false) {
         setIsConnected(false);
@@ -1048,6 +1070,7 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
                 setMcSpeakingLock(Boolean(data.payload?.isSpeaking));
                 break;
 
+              case 'SHOW_PANTUN':
               case 'TRIGGER_SMART_MC':
                 setMcSpeakingLock(true);
                 if (data.payload?.announcement) {
@@ -1175,7 +1198,7 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
               if (Array.isArray(data.payload?.queue)) setQueue(data.payload.queue);
             } else if (data.type === 'SMART_MC_STATUS') {
               setMcSpeakingLock(Boolean(data.payload?.isSpeaking));
-            } else if (data.type === 'TRIGGER_SMART_MC') {
+            } else if (data.type === 'SHOW_PANTUN' || data.type === 'TRIGGER_SMART_MC') {
               setMcSpeakingLock(true);
               if (data.payload?.announcement) setLastMcPreview(data.payload.announcement);
             } else if (data.type === 'TOGGLE_PAUSE') {
@@ -1327,7 +1350,7 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
     [searchQuery, suffixFilter, hitsIndoSongs, showToast]
   );
 
-  // Add song to queue
+  // Add song to queue (Real-time PeerJS/WS + Reliable /api/room-sync for Vercel & Samsung Tizen TV)
   const handleAddSongToQueue = async (song: Song, priority = false) => {
     const canonicalQueueId = `q-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
     const optimisticItem: QueueItem = {
@@ -1358,31 +1381,82 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
       setIsPlaying(true);
     }
 
-    // 2. Multi-Channel Dispatch with identical canonical queueId (plus retry queue)
-    sendPeerAction('ADD_QUEUE', { song, singerName, priority, queueId: canonicalQueueId, item: optimisticItem });
-    sendWsReliable('ADD_QUEUE_ITEM', { song, singerName, priority, queueId: canonicalQueueId, item: optimisticItem });
+    // 2. Multi-Channel Real-Time Dispatch + Vercel /api/room-sync
+    const peerOk = sendPeerAction('ADD_QUEUE', {
+      song,
+      singerName,
+      priority,
+      queueId: canonicalQueueId,
+      requestId: canonicalQueueId,
+      item: optimisticItem,
+    });
+    const wsOk = sendWsReliable('ADD_QUEUE_ITEM', {
+      song,
+      singerName,
+      priority,
+      queueId: canonicalQueueId,
+      requestId: canonicalQueueId,
+      item: optimisticItem,
+    });
 
-    try {
-      const res = await fetch(`/api/room/${encodeURIComponent(roomId)}/queue`, {
+    let serverSyncOk = false;
+
+    const [roomSyncResult, roomQueueResult] = await Promise.allSettled([
+      fetch('/api/room-sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          roomId,
+          action: 'ADD_QUEUE',
+          song,
+          singerName,
+          priority,
+          queueId: canonicalQueueId,
+          requestId: canonicalQueueId,
+        }),
+      }),
+      fetch(`/api/room/${encodeURIComponent(roomId)}/queue`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ song, singerName, priority, queueId: canonicalQueueId }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.currentSong) setCurrentSong(data.currentSong);
-        if (data.currentSinger !== undefined) setCurrentSinger(data.currentSinger);
-        if (Array.isArray(data.queue)) {
-          setQueue(data.queue);
-        }
-      }
-    } catch (err) {}
+      }),
+    ]);
 
-    showToast(
-      priority
-        ? `⚡ "${song.title.slice(0, 24)}..." diprioritaskan!`
-        : `✅ "${song.title.slice(0, 24)}..." masuk antrean TV!`
-    );
+    if (roomSyncResult.status === 'fulfilled' && roomSyncResult.value.ok) {
+      try {
+        const syncData = await roomSyncResult.value.json();
+        if (syncData?.success) {
+          serverSyncOk = true;
+          if (syncData.room?.nowPlaying) setCurrentSong(syncData.room.nowPlaying);
+          if (syncData.room?.currentSinger !== undefined) setCurrentSinger(syncData.room.currentSinger);
+          if (Array.isArray(syncData.room?.queue)) setQueue(syncData.room.queue);
+        }
+      } catch {}
+    }
+
+    if (roomQueueResult.status === 'fulfilled' && roomQueueResult.value.ok) {
+      try {
+        const data = await roomQueueResult.value.json();
+        if (data?.success) {
+          serverSyncOk = true;
+          if (data.currentSong) setCurrentSong(data.currentSong);
+          if (data.currentSinger !== undefined) setCurrentSinger(data.currentSinger);
+          if (Array.isArray(data.queue)) {
+            setQueue(data.queue);
+          }
+        }
+      } catch {}
+    }
+
+    if (serverSyncOk || peerOk || wsOk) {
+      showToast(
+        priority
+          ? `⚡ "${song.title.slice(0, 24)}..." diprioritaskan ke antrean TV!`
+          : `✅ "${song.title.slice(0, 24)}..." berhasil dikirim ke antrean TV!`
+      );
+    } else {
+      showToast(`❌ Gagal mengirim "${song.title.slice(0, 20)}..." ke TV. Periksa koneksi & kode room.`);
+    }
   };
 
   // Play song immediately on the TV
@@ -1392,18 +1466,35 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
     setIsPlaying(true);
 
     // Multi-Channel Dispatch
-    sendPeerAction('SELECT_SONG', song);
-    sendWsReliable('PLAY_NOW', { song, singerName });
+    const peerOk = sendPeerAction('SELECT_SONG', song);
+    const wsOk = sendWsReliable('PLAY_NOW', { song, singerName });
 
-    try {
-      await fetch(`/api/room/${encodeURIComponent(roomId)}/play-now`, {
+    let serverOk = false;
+    const [syncRes, directRes] = await Promise.allSettled([
+      fetch('/api/room-sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ roomId, action: 'PLAY_NOW', song, singerName }),
+      }),
+      fetch(`/api/room/${encodeURIComponent(roomId)}/play-now`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ song, singerName }),
-      });
+      }),
+    ]);
+
+    if (syncRes.status === 'fulfilled' && syncRes.value.ok) serverOk = true;
+    if (directRes.status === 'fulfilled' && directRes.value.ok) serverOk = true;
+
+    if (serverOk) {
       fetchRoomState();
-    } catch (e) {}
-    showToast(`▶️ Memutar di TV: "${song.title.slice(0, 22)}..."`);
+    }
+
+    if (serverOk || peerOk || wsOk) {
+      showToast(`▶️ Memutar di TV: "${song.title.slice(0, 22)}..."`);
+    } else {
+      showToast(`❌ Gagal memutar lagu di TV. Periksa koneksi room.`);
+    }
   };
 
   // Skip current song (Ganti lagu di TV)
@@ -1423,6 +1514,10 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
       setCurrentSong(nextSongItem);
       setCurrentSinger(queue[0].singerName || null);
       setQueue((prev) => prev.slice(1));
+    } else {
+      setCurrentSong(null);
+      setCurrentSinger(null);
+      setIsPlaying(false);
     }
 
     // Multi-Channel Dispatch
@@ -1430,15 +1525,27 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
     sendWsReliable('SKIP_NEXT', { senderName: singerName, nextSong: nextSongItem, queueId: nextQueueId });
 
     try {
-      const res = await fetch(`/api/room/${encodeURIComponent(roomId)}/skip`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ singerName, nextSong: nextSongItem, queueId: nextQueueId }),
-      });
-      if (res.ok) {
-        const data = await res.json();
+      const [syncRes, skipRes] = await Promise.allSettled([
+        fetch('/api/room-sync', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ roomId, action: 'SKIP_NEXT', singerName, consumedQueueId: nextQueueId }),
+        }),
+        fetch(`/api/room/${encodeURIComponent(roomId)}/skip`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ singerName, nextSong: nextSongItem, queueId: nextQueueId }),
+        }),
+      ]);
+      if (skipRes.status === 'fulfilled' && skipRes.value.ok) {
+        const data = await skipRes.value.json();
         if (Array.isArray(data.queue)) {
           setQueue(data.queue);
+        }
+      } else if (syncRes.status === 'fulfilled' && syncRes.value.ok) {
+        const data = await syncRes.value.json();
+        if (Array.isArray(data.room?.queue)) {
+          setQueue(data.room.queue);
         }
       }
     } catch (e) {}
@@ -1558,15 +1665,27 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
     sendWsReliable('REMOVE_QUEUE_ITEM', { queueId });
 
     try {
-      const res = await fetch(`/api/room/${encodeURIComponent(roomId)}/remove`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ queueId }),
-      });
-      if (res.ok) {
-        const data = await res.json();
+      const [syncRes, removeRes] = await Promise.allSettled([
+        fetch('/api/room-sync', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ roomId, action: 'REMOVE_QUEUE', queueId }),
+        }),
+        fetch(`/api/room/${encodeURIComponent(roomId)}/remove`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ queueId }),
+        }),
+      ]);
+      if (removeRes.status === 'fulfilled' && removeRes.value.ok) {
+        const data = await removeRes.value.json();
         if (Array.isArray(data.queue)) {
           setQueue(data.queue);
+        }
+      } else if (syncRes.status === 'fulfilled' && syncRes.value.ok) {
+        const data = await syncRes.value.json();
+        if (Array.isArray(data.room?.queue)) {
+          setQueue(data.room.queue);
         }
       }
     } catch (e) {}
@@ -1634,6 +1753,11 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
 
     const payload = {
       announcement,
+      sampiran: announcement.sampiran,
+      isi: announcement.isi,
+      komentar: announcement.komentar,
+      namaVokalis: vocalistName,
+      judulLagu: songTitle,
       singerName: vocalistName,
       senderName: singerName,
       songTitle,
@@ -1642,28 +1766,49 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
     };
 
     // 1. PeerJS DataConnection P2P
-    sendPeerAction('TRIGGER_SMART_MC', payload);
+    const peerOk = sendPeerAction('SHOW_PANTUN', payload) || sendPeerAction('TRIGGER_SMART_MC', payload);
 
     // 2. WebSocket (with retry queue)
-    sendWsReliable('TRIGGER_SMART_MC', payload);
+    const wsOk = sendWsReliable('SHOW_PANTUN', payload) || sendWsReliable('TRIGGER_SMART_MC', payload);
 
-    // 3. HTTP Fallback
-    try {
-      const res = await fetch(`/api/room/${encodeURIComponent(roomId)}/smart-mc`, {
+    // 3. HTTP /api/room-sync & /api/room/:id/smart-mc
+    let serverOk = false;
+    const [syncRes, smartMcRes] = await Promise.allSettled([
+      fetch('/api/room-sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          roomId,
+          action: 'SHOW_PANTUN',
+          announcement,
+          singerName: vocalistName,
+          payload,
+        }),
+      }),
+      fetch(`/api/room/${encodeURIComponent(roomId)}/smart-mc`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
-      });
-      if (res.ok) {
-        const data = await res.json();
+      }),
+    ]);
+
+    if (syncRes.status === 'fulfilled' && syncRes.value.ok) serverOk = true;
+    if (smartMcRes.status === 'fulfilled' && smartMcRes.value.ok) {
+      serverOk = true;
+      try {
+        const data = await smartMcRes.value.json();
         if (data.skipped === 'mc_busy') {
           showToast('⏳ Pantun MC pertama sedang berlangsung di TV!');
           return;
         }
-      }
-    } catch {}
+      } catch {}
+    }
 
-    showToast('🎙️ Pantun Smart MC ditampilkan & dibacakan di Layar TV!');
+    if (serverOk || peerOk || wsOk) {
+      showToast('🎙️ Pantun Smart MC ditampilkan & dibacakan di Layar TV!');
+    } else {
+      showToast('❌ Gagal mengirim Pantun MC ke TV. Periksa koneksi room.');
+    }
   };
 
   // Add Direct YouTube Link
@@ -2195,16 +2340,6 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
                       <span>Hits YouTube Indo ({hitsIndoSongs.length})</span>
                     </span>
                   )}
-                  <button
-                    type="button"
-                    onClick={handleRefreshHits}
-                    disabled={isRefreshingHits}
-                    className="inline-flex items-center gap-1 rounded-lg bg-rose-950/70 hover:bg-rose-900 border border-rose-500/50 px-2 py-0.5 text-[10px] font-bold text-rose-200 transition active:scale-95 disabled:opacity-50"
-                    title="Ambil lagu hits Indonesia tren terbaru dari YouTube"
-                  >
-                    <RefreshCw className={`h-2.5 w-2.5 ${isRefreshingHits ? 'animate-spin' : ''}`} />
-                    <span>{isRefreshingHits ? 'Memuat...' : 'Update Tren'}</span>
-                  </button>
                 </div>
               </div>
 
@@ -3426,18 +3561,6 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
                       Lagu siap langsung diputar di TV atau dimasukkan antrean
                     </p>
                   </div>
-                </div>
-                <div className="flex items-center gap-1.5 shrink-0">
-                  <button
-                    type="button"
-                    onClick={handleRefreshHits}
-                    disabled={isRefreshingHits}
-                    className="flex items-center gap-1 rounded-full bg-rose-500/25 hover:bg-rose-500/40 border border-rose-400/50 px-2.5 py-1 text-[10px] font-bold text-rose-200 transition active:scale-95 disabled:opacity-50"
-                    title="Update daftar Hits YouTube Indonesia terbaru"
-                  >
-                    <RefreshCw className={`h-3 w-3 ${isRefreshingHits ? 'animate-spin' : ''}`} />
-                    <span>{isRefreshingHits ? 'Update...' : 'Update Tren'}</span>
-                  </button>
                 </div>
               </div>
 

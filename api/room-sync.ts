@@ -3,6 +3,7 @@
 
 interface SyncQueueItem {
   queueId: string;
+  requestId?: string;
   song: any;
   singerName: string;
   addedAt: number;
@@ -55,6 +56,7 @@ export default async function handler(req: any, res: any) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+  res.setHeader('Cache-Control', 'no-store, max-age=0');
 
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
@@ -88,7 +90,7 @@ export default async function handler(req: any, res: any) {
 
     if (req.method === 'POST') {
       const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body || {};
-      const { roomId, action, song, singerName, priority, queueId, payload, announcement } = body;
+      const { roomId, action, song, singerName, priority, queueId, requestId, payload, announcement } = body;
 
       const room = getOrCreateServerlessRoom(roomId || payload?.roomId);
       const cleanSinger = (singerName || payload?.singerName || 'Prajurit (HP)').trim();
@@ -96,28 +98,32 @@ export default async function handler(req: any, res: any) {
 
       switch (action) {
         case 'ADD_QUEUE': {
-          if (!song || !song.id) {
+          const targetSong = song || payload?.song;
+          if (!targetSong || !targetSong.id) {
             return res.status(400).json({ success: false, error: 'Data lagu tidak valid' });
           }
 
-          const qId = (queueId || payload?.queueId || `q-${now}-${Math.random().toString(36).substring(2, 7)}`).trim();
+          const qId = (queueId || payload?.queueId || requestId || payload?.requestId || `q-${now}-${Math.random().toString(36).substring(2, 7)}`).trim();
+          const reqId = (requestId || payload?.requestId || qId).trim();
 
-          // Deduplicate if already in queue
-          const exists = room.queue.some((q) => q.queueId === qId || (q.song?.id === song.id && q.singerName === cleanSinger && now - (q.addedAt || 0) < 3000));
+          // Deduplicate by queueId / requestId / recent identical song+singer
+          const exists = room.queue.some(
+            (q) =>
+              q.queueId === qId ||
+              (q.requestId && q.requestId === reqId) ||
+              (q.song?.id === targetSong.id && q.singerName === cleanSinger && now - (q.addedAt || 0) < 3000)
+          );
           if (!exists) {
             const newItem: SyncQueueItem = {
               queueId: qId,
-              song,
+              requestId: reqId,
+              song: targetSong,
               singerName: cleanSinger,
               addedAt: now,
               priority: Boolean(priority || payload?.priority),
             };
 
-            if (!room.currentSong) {
-              room.currentSong = song;
-              room.currentSinger = cleanSinger;
-              room.isPlaying = true;
-            } else if (newItem.priority) {
+            if (newItem.priority) {
               room.queue.unshift(newItem);
             } else {
               room.queue.push(newItem);
@@ -127,28 +133,49 @@ export default async function handler(req: any, res: any) {
         }
 
         case 'PLAY_NOW': {
-          if (song && song.id) {
+          const targetSong = song || payload?.song;
+          const consumedId = body.consumedQueueId || queueId || payload?.consumedQueueId || payload?.queueId;
+          if (consumedId) {
+            room.queue = room.queue.filter((q) => q.queueId !== consumedId && q.requestId !== consumedId);
+          }
+          if (targetSong && targetSong.id) {
             if (room.currentSong) {
               room.history = [room.currentSong, ...room.history.slice(0, 19)];
             }
-            room.currentSong = song;
+            room.currentSong = targetSong;
             room.currentSinger = cleanSinger;
             room.isPlaying = true;
           }
           break;
         }
 
+        case 'STOP_IDLE': {
+          if (room.currentSong) {
+            room.history = [room.currentSong, ...room.history.slice(0, 19)];
+          }
+          room.currentSong = null;
+          room.currentSinger = null;
+          room.isPlaying = false;
+          break;
+        }
+
         case 'SKIP_NEXT': {
-          if (room.queue.length > 0) {
-            const next = room.queue.shift();
-            if (next) {
-              if (room.currentSong) {
-                room.history = [room.currentSong, ...room.history.slice(0, 19)];
-              }
-              room.currentSong = next.song;
-              room.currentSinger = next.singerName;
-              room.isPlaying = true;
+          const targetId = body.consumedQueueId || queueId || payload?.queueId;
+          let next: SyncQueueItem | undefined;
+          if (targetId) {
+            next = room.queue.find((q) => q.queueId === targetId || q.requestId === targetId);
+            room.queue = room.queue.filter((q) => q.queueId !== targetId && q.requestId !== targetId);
+          } else if (room.queue.length > 0) {
+            next = room.queue.shift();
+          }
+
+          if (next) {
+            if (room.currentSong) {
+              room.history = [room.currentSong, ...room.history.slice(0, 19)];
             }
+            room.currentSong = next.song;
+            room.currentSinger = next.singerName;
+            room.isPlaying = true;
           } else {
             room.currentSong = null;
             room.currentSinger = null;
@@ -160,7 +187,7 @@ export default async function handler(req: any, res: any) {
         case 'REMOVE_QUEUE': {
           const targetId = queueId || payload?.queueId;
           if (targetId) {
-            room.queue = room.queue.filter((q) => q.queueId !== targetId);
+            room.queue = room.queue.filter((q) => q.queueId !== targetId && q.requestId !== targetId);
           }
           break;
         }

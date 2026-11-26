@@ -80,12 +80,11 @@ export const TVStageMode: React.FC<TVStageModeProps> = ({ standalone = false }) 
   // Auto trigger native Fullscreen & Screen Wake Lock immediately on mount for Samsung Smart TV (Tizen OS)
   useEffect(() => {
     const cleanup = autoTriggerSmartTvFullscreen();
-    setIsPlaying(true);
     requestScreenWakeLock().then((locked) => setWakeLockActive(locked));
     return () => {
       cleanup();
     };
-  }, [setIsPlaying]);
+  }, []);
 
   // Fetch server detected IP/hostname on mount
   useEffect(() => {
