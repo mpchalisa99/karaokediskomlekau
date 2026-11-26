@@ -174,6 +174,11 @@ export interface SmartMcAnnouncement {
   tier: SmartMcTier;
   badge: string;
   pantunLines: [string, string, string, string];
+  sampiran?: [string, string] | string[];
+  isi?: [string, string] | string[];
+  komentar?: string;
+  namaVokalis?: string;
+  judulLagu?: string;
   commentary: string;
   fullSpeechText: string;
   singerName: string;
@@ -216,6 +221,7 @@ export type WebSocketMessageType =
   | 'SUBMIT_JURY_SCORE'
   | 'SYNC_JURY_SCORES'
   | 'TRIGGER_SMART_MC'
+  | 'SHOW_PANTUN'
   | 'SMART_MC_STATUS';
 
 export interface WebSocketMessage {

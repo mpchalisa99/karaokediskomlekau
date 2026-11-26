@@ -22,9 +22,9 @@ const TvYouTubeEmbedComponent: React.FC<MemoizedTvYouTubeEmbedProps> = ({
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
   const videoOrigin = typeof window !== 'undefined' ? window.location.origin : '';
-  // Parameter YouTube embed ringan khusus Smart TV Samsung Tizen OS (iv_load_policy=3, rel=0, modestbranding=1, vq=hd720)
+  // Parameter YouTube embed ringan khusus Smart TV Samsung Tizen OS (iv_load_policy=3, rel=0, modestbranding=1, vq=hd720, wmode=opaque)
   const iframeSrc = videoId
-    ? `https://www.youtube.com/embed/${videoId}?autoplay=1&enablejsapi=1&rel=0&iv_load_policy=3&playsinline=1&controls=0&modestbranding=1&vq=hd720&origin=${encodeURIComponent(
+    ? `https://www.youtube.com/embed/${videoId}?autoplay=1&enablejsapi=1&rel=0&iv_load_policy=3&playsinline=1&controls=0&modestbranding=1&vq=hd720&wmode=opaque&origin=${encodeURIComponent(
         videoOrigin
       )}`
     : '';
@@ -135,6 +135,8 @@ const TvYouTubeEmbedComponent: React.FC<MemoizedTvYouTubeEmbedProps> = ({
         border: 0,
         display: 'block',
         backgroundColor: '#000000',
+        position: 'relative',
+        zIndex: 1,
       }}
       allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
       allowFullScreen
@@ -190,7 +192,7 @@ export const MemoizedMasterYouTubeTarget = React.memo(
         backgroundColor: '#000000',
       }}
     >
-      <div id="karaoke-yt-iframe-target" style={{ width: '100%', height: '100%' }} />
+      <div id="karaoke-yt-iframe-target" style={{ width: '100%', height: '100%', position: 'relative', zIndex: 1 }} />
     </div>
   ),
   (prev, next) => prev.hidden === next.hidden

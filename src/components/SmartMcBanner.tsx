@@ -2,62 +2,77 @@ import React from 'react';
 import { Mic, Volume2, RefreshCw, X, Radio } from 'lucide-react';
 import { useKaraoke } from '../context/KaraokeContext';
 
+/**
+ * Komponen Popup Kartu SMART MC DISKOMLEKAU
+ * Dioptimalkan untuk kompatibilitas penuh dan keterbacaan tinggi di browser Smart TV Android 13
+ * dan Samsung Tizen OS (Solid Background rgba(10, 15, 28, 0.96), Border tegas 2px solid #eab308, z-index 99999).
+ */
 export const SmartMcBanner: React.FC = () => {
   const {
     activeMcAnnouncement,
+    isSmartMcVisible,
     isMcSpeaking,
-    isPlaying,
-    isPlayerEnded,
     triggerSmartMc,
     replaySmartMcSpeech,
     dismissSmartMc,
   } = useKaraoke();
 
-  if (!activeMcAnnouncement) return null;
-  // Larangan Mutlak di Tengah Lagu: Sembunyikan Smart MC otomatis selama lagu sedang diputar (status bukan ENDED)
-  if (isPlaying && !isPlayerEnded && !activeMcAnnouncement.isManual) return null;
+  if (!isSmartMcVisible || !activeMcAnnouncement) return null;
 
-  const { badge, pantunLines, commentary, singerName, songTitle, score, tier, nextSongTitle } =
-    activeMcAnnouncement;
+  const {
+    badge,
+    pantunLines,
+    commentary,
+    komentar,
+    singerName,
+    namaVokalis,
+    songTitle,
+    judulLagu,
+    score,
+    tier,
+    nextSongTitle,
+  } = activeMcAnnouncement;
 
-  const tierBorderHex =
-    tier === 'high' ? '#34d399' : tier === 'low' ? '#fb7185' : '#fbbf24';
+  const displaySinger = namaVokalis || singerName || 'Prajurit Diskomlekau';
+  const displaySong = judulLagu || songTitle || 'Lagu Pilihan';
+  const displayCommentary = komentar || commentary || '';
 
-  const tierBadgeBgHex =
-    tier === 'high'
-      ? 'rgba(16, 185, 129, 0.22)'
-      : tier === 'low'
-      ? 'rgba(244, 63, 94, 0.22)'
-      : 'rgba(251, 191, 36, 0.22)';
-
-  const tierBadgeTextHex =
-    tier === 'high' ? '#a7f3d0' : tier === 'low' ? '#fecdd3' : '#fde68a';
+  const sampiran1 = (activeMcAnnouncement.sampiran && activeMcAnnouncement.sampiran[0]) || pantunLines[0] || '';
+  const sampiran2 = (activeMcAnnouncement.sampiran && activeMcAnnouncement.sampiran[1]) || pantunLines[1] || '';
+  const isi1 = (activeMcAnnouncement.isi && activeMcAnnouncement.isi[0]) || pantunLines[2] || '';
+  const isi2 = (activeMcAnnouncement.isi && activeMcAnnouncement.isi[1]) || pantunLines[3] || '';
 
   return (
     <aside
-      role="region"
-      aria-label="Smart MC Diskomlekau Pantun Banner"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Smart MC Diskomlekau Pantun Card"
+      id="smart-mc-tv-card"
       style={{
         position: 'fixed',
         bottom: '24px',
         left: '50%',
         transform: 'translateX(-50%)',
-        width: '80%',
-        maxWidth: '820px',
-        zIndex: 1000005,
+        width: '85%',
+        maxWidth: '860px',
+        zIndex: 99999,
         overflow: 'hidden',
         wordWrap: 'break-word',
         overflowWrap: 'break-word',
-        backgroundColor: 'rgba(15, 23, 42, 0.92)',
-        border: `2px solid ${tierBorderHex}`,
-        borderRadius: '14px',
-        padding: '12px 18px',
+        backgroundColor: 'rgba(10, 15, 28, 0.96)',
+        border: '2px solid #eab308',
+        borderRadius: '16px',
+        boxShadow: '0 12px 36px rgba(0, 0, 0, 0.9), 0 0 0 1px rgba(234, 179, 8, 0.35)',
+        padding: '14px 18px',
         color: '#ffffff',
         boxSizing: 'border-box',
         pointerEvents: 'auto',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '10px',
       }}
     >
-      {/* Top Bar: Identity, Tier Badge & Controls */}
+      {/* Baris Atas: Identitas MC, Vokalis, Lagu & Tombol Kontrol */}
       <div
         style={{
           display: 'flex',
@@ -66,8 +81,7 @@ export const SmartMcBanner: React.FC = () => {
           justifyContent: 'space-between',
           gap: '8px',
           paddingBottom: '8px',
-          marginBottom: '8px',
-          borderBottom: '1px solid rgba(56, 189, 248, 0.3)',
+          borderBottom: '1px solid rgba(234, 179, 8, 0.35)',
         }}
       >
         <div
@@ -79,33 +93,35 @@ export const SmartMcBanner: React.FC = () => {
             flex: '1 1 auto',
           }}
         >
+          {/* Icon Mic dengan Indikator Suara Aktif */}
           <div
             style={{
               position: 'relative',
               display: 'flex',
-              height: '34px',
-              width: '34px',
+              height: '36px',
+              width: '36px',
               alignItems: 'center',
               justifyContent: 'center',
               borderRadius: '10px',
-              backgroundColor: '#f59e0b',
+              backgroundColor: '#eab308',
               color: '#020617',
               fontWeight: 900,
               flexShrink: 0,
+              boxShadow: '0 2px 8px rgba(234, 179, 8, 0.4)',
             }}
           >
-            <Mic style={{ width: '18px', height: '18px' }} />
+            <Mic style={{ width: '20px', height: '20px' }} />
             {isMcSpeaking && (
               <span
                 style={{
                   position: 'absolute',
                   top: '-3px',
                   right: '-3px',
-                  width: '10px',
-                  height: '10px',
+                  width: '11px',
+                  height: '11px',
                   borderRadius: '50%',
                   backgroundColor: '#10b981',
-                  border: '1.5px solid #ffffff',
+                  border: '2px solid #ffffff',
                 }}
               />
             )}
@@ -122,20 +138,20 @@ export const SmartMcBanner: React.FC = () => {
             >
               <span
                 style={{
-                  fontSize: '12px',
+                  fontSize: '13px',
                   fontWeight: 900,
                   letterSpacing: '0.06em',
                   textTransform: 'uppercase',
-                  color: '#fcd34d',
+                  color: '#facc15',
                   display: 'inline-flex',
                   alignItems: 'center',
-                  gap: '4px',
+                  gap: '5px',
                 }}
               >
                 <Radio
                   style={{
-                    width: '14px',
-                    height: '14px',
+                    width: '15px',
+                    height: '15px',
                     color: isMcSpeaking ? '#34d399' : '#38bdf8',
                   }}
                 />
@@ -148,35 +164,46 @@ export const SmartMcBanner: React.FC = () => {
                   fontWeight: 900,
                   padding: '2px 8px',
                   borderRadius: '6px',
-                  backgroundColor: tierBadgeBgHex,
-                  color: tierBadgeTextHex,
-                  border: `1px solid ${tierBorderHex}`,
+                  backgroundColor: 'rgba(234, 179, 8, 0.2)',
+                  color: '#fef08a',
+                  border: '1px solid #eab308',
                 }}
               >
                 {badge}
               </span>
+              <span
+                style={{
+                  fontSize: '10px',
+                  fontFamily: 'monospace',
+                  color: '#94a3b8',
+                  marginLeft: 'auto',
+                }}
+              >
+                Auto-tutup 10s • Remote [OK / Back]
+              </span>
             </div>
 
+            {/* Nama Vokalis & Judul Lagu */}
             <div
               style={{
                 display: 'flex',
                 alignItems: 'center',
                 gap: '6px',
-                fontSize: '11px',
+                fontSize: '12px',
                 color: '#bae6fd',
                 fontFamily: 'monospace',
-                marginTop: '2px',
+                marginTop: '3px',
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
                 whiteSpace: 'nowrap',
               }}
             >
               <span>
-                Vokalis: <strong style={{ color: '#fcd34d' }}>{singerName}</strong>
+                Vokalis: <strong style={{ color: '#fde047' }}>{displaySinger}</strong>
               </span>
               <span>|</span>
               <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                Lagu: <strong style={{ color: '#ffffff' }}>{songTitle}</strong>
+                Lagu: <strong style={{ color: '#ffffff' }}>{displaySong}</strong>
               </span>
               {typeof score === 'number' && (
                 <>
@@ -190,7 +217,7 @@ export const SmartMcBanner: React.FC = () => {
           </div>
         </div>
 
-        {/* Action Buttons */}
+        {/* Tombol Aksi Smart MC */}
         <div
           style={{
             display: 'flex',
@@ -251,11 +278,11 @@ export const SmartMcBanner: React.FC = () => {
             disabled={isMcSpeaking}
             onClick={() =>
               triggerSmartMc({
-                singerName,
-                songTitle,
+                singerName: displaySinger,
+                songTitle: displaySong,
                 score,
                 forceTier: tier,
-                isManual: Boolean(activeMcAnnouncement.isManual),
+                isManual: true,
                 nextSongTitle,
                 broadcast: true,
               })
@@ -266,11 +293,11 @@ export const SmartMcBanner: React.FC = () => {
               gap: '4px',
               padding: '5px 10px',
               borderRadius: '8px',
-              backgroundColor: isMcSpeaking ? '#b45309' : '#f59e0b',
+              backgroundColor: isMcSpeaking ? '#b45309' : '#eab308',
               color: '#020617',
               fontSize: '11px',
               fontWeight: 900,
-              border: '1px solid #fcd34d',
+              border: '1px solid #fde047',
               cursor: isMcSpeaking ? 'not-allowed' : 'pointer',
               opacity: isMcSpeaking ? 0.55 : 1,
             }}
@@ -286,89 +313,96 @@ export const SmartMcBanner: React.FC = () => {
             style={{
               display: 'inline-flex',
               alignItems: 'center',
-              justifyContent: 'center',
-              height: '28px',
-              width: '28px',
+              gap: '4px',
+              padding: '5px 10px',
               borderRadius: '8px',
               backgroundColor: '#1e293b',
-              color: '#cbd5e1',
-              border: '1px solid #475569',
+              color: '#f8fafc',
+              fontSize: '11px',
+              fontWeight: 800,
+              border: '1px solid #64748b',
               cursor: 'pointer',
             }}
-            title="Tutup Smart MC"
+            title="Tutup Smart MC (Tombol OK / Back pada Remote TV)"
           >
-            <X style={{ width: '14px', height: '14px' }} />
+            <X style={{ width: '13px', height: '13px' }} />
+            <span>Tutup (OK)</span>
           </button>
         </div>
       </div>
 
-      {/* Pantun 4 Baris (Sampiran & Isi) - Flexbox sederhana agar kompatibel penuh di Tizen OS */}
+      {/* Bagian Pantun 4 Baris: SAMPIRAN PANTUN & ISI KOMANDO */}
       <div
         style={{
           display: 'flex',
           flexDirection: 'row',
           flexWrap: 'wrap',
-          gap: '10px',
-          backgroundColor: 'rgba(2, 6, 23, 0.85)',
-          borderRadius: '10px',
-          padding: '10px 12px',
-          border: '1px solid rgba(251, 191, 36, 0.35)',
+          gap: '12px',
+          backgroundColor: '#040916',
+          borderRadius: '12px',
+          padding: '12px 14px',
+          border: '1px solid rgba(234, 179, 8, 0.4)',
           boxSizing: 'border-box',
         }}
       >
+        {/* SAMPIRAN PANTUN (2 Baris Pertama) */}
         <div
           style={{
-            flex: '1 1 260px',
+            flex: '1 1 280px',
             minWidth: 0,
             textAlign: 'left',
-            paddingRight: '8px',
             boxSizing: 'border-box',
           }}
         >
           <div
             style={{
-              fontSize: '10px',
+              fontSize: '11px',
               fontFamily: 'monospace',
-              fontWeight: 800,
+              fontWeight: 900,
               textTransform: 'uppercase',
               letterSpacing: '0.08em',
               color: '#38bdf8',
-              marginBottom: '3px',
+              marginBottom: '4px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px',
             }}
           >
-            SAMPIRAN PANTUN:
+            <span>📜</span>
+            <span>SAMPIRAN PANTUN:</span>
           </div>
           <p
             style={{
-              margin: '0 0 2px 0',
-              fontSize: '13px',
+              margin: '0 0 3px 0',
+              fontSize: '14px',
               fontWeight: 700,
               color: '#e2e8f0',
               fontStyle: 'italic',
-              lineHeight: 1.35,
+              lineHeight: 1.4,
               wordWrap: 'break-word',
             }}
           >
-            &ldquo;{pantunLines[0]}&rdquo;
+            &ldquo;{sampiran1}&rdquo;
           </p>
           <p
             style={{
               margin: 0,
-              fontSize: '13px',
+              fontSize: '14px',
               fontWeight: 700,
               color: '#e2e8f0',
               fontStyle: 'italic',
-              lineHeight: 1.35,
+              lineHeight: 1.4,
               wordWrap: 'break-word',
             }}
           >
-            &ldquo;{pantunLines[1]}&rdquo;
+            &ldquo;{sampiran2}&rdquo;
           </p>
         </div>
 
+        {/* ISI KOMANDO (2 Baris Penutup Pantun) */}
         <div
           style={{
-            flex: '1 1 260px',
+            flex: '1 1 280px',
             minWidth: 0,
             textAlign: 'left',
             boxSizing: 'border-box',
@@ -376,57 +410,60 @@ export const SmartMcBanner: React.FC = () => {
         >
           <div
             style={{
-              fontSize: '10px',
+              fontSize: '11px',
               fontFamily: 'monospace',
               fontWeight: 900,
               textTransform: 'uppercase',
               letterSpacing: '0.08em',
-              color: '#fcd34d',
-              marginBottom: '3px',
+              color: '#eab308',
+              marginBottom: '4px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px',
             }}
           >
-            ISI KOMANDO:
+            <span>⚡</span>
+            <span>ISI KOMANDO:</span>
           </div>
           <p
             style={{
-              margin: '0 0 2px 0',
-              fontSize: '14px',
+              margin: '0 0 3px 0',
+              fontSize: '15px',
               fontWeight: 900,
-              color: '#fcd34d',
-              lineHeight: 1.35,
+              color: '#facc15',
+              lineHeight: 1.4,
               wordWrap: 'break-word',
             }}
           >
-            &ldquo;{pantunLines[2]}&rdquo;
+            &ldquo;{isi1}&rdquo;
           </p>
           <p
             style={{
               margin: 0,
-              fontSize: '14px',
+              fontSize: '15px',
               fontWeight: 900,
               color: '#fef08a',
-              lineHeight: 1.35,
+              lineHeight: 1.4,
               wordWrap: 'break-word',
             }}
           >
-            &ldquo;{pantunLines[3]}&rdquo;
+            &ldquo;{isi2}&rdquo;
           </p>
         </div>
       </div>
 
-      {/* Komentar MC hanya ditampilkan jika terisi */}
-      {Boolean(commentary && commentary.trim()) && (
+      {/* Bagian KOMENTAR MC DISKOMLEKAU */}
+      {Boolean(displayCommentary && displayCommentary.trim()) && (
         <div
           style={{
-            marginTop: '8px',
             display: 'flex',
             alignItems: 'flex-start',
             gap: '8px',
             textAlign: 'left',
-            backgroundColor: 'rgba(8, 47, 73, 0.65)',
+            backgroundColor: '#07162c',
             borderRadius: '10px',
-            padding: '7px 12px',
-            border: '1px solid rgba(56, 189, 248, 0.3)',
+            padding: '8px 12px',
+            border: '1px solid rgba(56, 189, 248, 0.4)',
             boxSizing: 'border-box',
           }}
         >
@@ -434,7 +471,7 @@ export const SmartMcBanner: React.FC = () => {
             style={{
               fontSize: '11px',
               fontWeight: 900,
-              color: '#6ee7b7',
+              color: '#34d399',
               flexShrink: 0,
               fontFamily: 'monospace',
             }}
@@ -447,11 +484,11 @@ export const SmartMcBanner: React.FC = () => {
               fontSize: '12px',
               fontWeight: 700,
               color: '#e0f2fe',
-              lineHeight: 1.4,
+              lineHeight: 1.45,
               wordWrap: 'break-word',
             }}
           >
-            {commentary}
+            {displayCommentary}
           </p>
         </div>
       )}

@@ -79,6 +79,8 @@ interface KaraokeContextType {
   // Smart MC Diskomlekau (100% Local Pantun & Indonesian Voice/TTS)
   activeMcAnnouncement: SmartMcAnnouncement | null;
   isMcSpeaking: boolean;
+  isSmartMcVisible: boolean;
+  setIsSmartMcVisible: (visible: boolean) => void;
   isPlayerEnded: boolean;
   triggerSmartMc: (options?: {
     singerName?: string;
@@ -265,6 +267,7 @@ export const KaraokeProvider: React.FC<{ children: React.ReactNode; initialIsTvM
   // Smart MC Diskomlekau & Audio Ducking State
   const [activeMcAnnouncement, setActiveMcAnnouncement] = useState<SmartMcAnnouncement | null>(null);
   const [isMcSpeaking, setIsMcSpeaking] = useState<boolean>(false);
+  const [isSmartMcVisible, setIsSmartMcVisible] = useState<boolean>(false);
   const [isPlayerEnded, setIsPlayerEnded] = useState<boolean>(false);
   const isPlayerEndedRef = useRef<boolean>(false);
   const isPlayingRef = useRef<boolean>(false);
@@ -996,20 +999,40 @@ export const KaraokeProvider: React.FC<{ children: React.ReactNode; initialIsTvM
                 break;
               }
 
+              case 'SHOW_PANTUN':
               case 'TRIGGER_SMART_MC': {
                 const incomingId = data.payload?.announcement?.id;
                 const alreadyHandled = Boolean(incomingId && processedMcIdsRef.current.has(incomingId));
                 if (!alreadyHandled && !isMcSpeakingRef.current && !isSmartMcPlaying()) {
                   const sender = data.payload?.senderName || data.payload?.singerName || 'Prajurit (HP)';
+                  const singer = data.payload?.namaVokalis || data.payload?.singerName || currentSingerNameRef.current || defaultSingerName;
+                  const song = data.payload?.judulLagu || data.payload?.songTitle || currentSong?.title;
+
+                  let announcement = data.payload?.announcement
+                    ? { ...data.payload.announcement, isManual: true }
+                    : generateSmartMcAnnouncement({
+                        singerName: singer,
+                        songTitle: song,
+                        score: typeof data.payload?.score === 'number' ? data.payload.score : currentScoreData?.totalScore,
+                        forceTier: data.payload?.forceTier,
+                        triggeredBy: sender,
+                        isManual: true,
+                      });
+
+                  if (data.payload?.sampiran) announcement.sampiran = data.payload.sampiran;
+                  if (data.payload?.isi) announcement.isi = data.payload.isi;
+                  if (data.payload?.komentar) announcement.komentar = data.payload.komentar;
+                  announcement.namaVokalis = singer;
+                  announcement.judulLagu = song;
+
+                  setIsSmartMcVisible(true);
                   triggerSmartMcRef.current({
-                    singerName: data.payload?.singerName || currentSingerNameRef.current || defaultSingerName,
-                    songTitle: data.payload?.songTitle || currentSong?.title,
+                    singerName: singer,
+                    songTitle: song,
                     score: typeof data.payload?.score === 'number' ? data.payload.score : currentScoreData?.totalScore,
                     forceTier: data.payload?.forceTier,
                     triggeredBy: sender,
-                    announcement: data.payload?.announcement
-                      ? { ...data.payload.announcement, isManual: true }
-                      : undefined,
+                    announcement,
                     isManual: true,
                     broadcast: false,
                   });
@@ -1755,6 +1778,7 @@ export const KaraokeProvider: React.FC<{ children: React.ReactNode; initialIsTvM
     stopSmartMcSpeech();
     stopAudioDucking();
     setIsMcSpeaking(false);
+    setIsSmartMcVisible(false);
     setActiveMcAnnouncement(null);
     broadcastMcStatus(false);
   }, [stopAudioDucking, broadcastMcStatus]);
@@ -1763,7 +1787,6 @@ export const KaraokeProvider: React.FC<{ children: React.ReactNode; initialIsTvM
   const playSongNow = useCallback(
     (song: Song, singerName?: string) => {
       const sName = singerName || defaultSingerName;
-      // Larangan Mutlak di Tengah Lagu: Hentikan Smart MC & speechSynthesis saat lagu mulai diputar
       clearSmartMcImmediately();
       isPlayerEndedRef.current = false;
       setIsPlayerEnded(false);
@@ -1813,6 +1836,16 @@ export const KaraokeProvider: React.FC<{ children: React.ReactNode; initialIsTvM
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ song, singerName: sName }),
       }).catch(() => {});
+
+      // Pemicu otomatis kartu SMART MC DISKOMLEKAU saat lagu baru mulai diputar di TV
+      setTimeout(() => {
+        triggerSmartMcRef.current({
+          singerName: sName,
+          songTitle: song.title,
+          isManual: true,
+          broadcast: true,
+        });
+      }, 350);
     },
     [currentSong, broadcastMessage, roomId, defaultSingerName, playerRef, isMuted, audioVolume, clearSmartMcImmediately, setTrackedCurrentSinger]
   );
@@ -1918,6 +1951,17 @@ export const KaraokeProvider: React.FC<{ children: React.ReactNode; initialIsTvM
             body: JSON.stringify({ singerName: nextSinger, nextSong: nextItem.song, queueId: nextItem.queueId }),
           }).catch(() => {});
         }
+
+        // Pemicu otomatis kartu SMART MC DISKOMLEKAU saat lagu berikutnya mulai diputar di TV
+        setTimeout(() => {
+          triggerSmartMcRef.current({
+            singerName: nextSinger,
+            songTitle: nextItem.song.title,
+            isManual: true,
+            broadcast: true,
+          });
+        }, 350);
+
         return remaining;
       });
     },
@@ -2010,21 +2054,25 @@ export const KaraokeProvider: React.FC<{ children: React.ReactNode; initialIsTvM
   const dismissSmartMc = useCallback(() => {
     const shouldAdvanceQueue = isAwaitingEndTransitionQueueSkipRef.current;
     clearSmartMcImmediately();
+    setIsSmartMcVisible(false);
+    fetch('/api/room-sync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ roomId, action: 'DISMISS_SMART_MC' }),
+    }).catch(() => {});
     if (shouldAdvanceQueue) {
       lastSkipTimestampRef.current = 0;
       skipNextSong();
     }
-  }, [clearSmartMcImmediately, skipNextSong]);
+  }, [clearSmartMcImmediately, skipNextSong, roomId]);
 
-  // KETENTUAN 1 (Larangan Mutlak di Tengah Lagu):
-  // Saat lagu mulai atau kembali diputar (isPlaying === true), reset status ENDED dan hentikan Smart MC + speechSynthesis.
+  // Saat lagu mulai diputar (isPlaying === true), reset status ENDED
   useEffect(() => {
     if (isPlaying && currentSong?.id) {
       isPlayerEndedRef.current = false;
       setIsPlayerEnded(false);
-      clearSmartMcImmediately();
     }
-  }, [isPlaying, currentSong?.id, clearSmartMcImmediately]);
+  }, [isPlaying, currentSong?.id]);
 
   // Selama lagu sedang diputar (isPlaying === true dan status pemutar bukan ENDED),
   // Smart MC otomatis wajib diblokir/disembunyikan total, serta hentikan suara speechSynthesis.
@@ -2178,17 +2226,19 @@ export const KaraokeProvider: React.FC<{ children: React.ReactNode; initialIsTvM
       isMcSpeakingRef.current = true;
       setIsMcSpeaking(true);
       setActiveMcAnnouncement(announcement);
+      setIsSmartMcVisible(true);
       broadcastMcStatus(true);
 
-      // Batas aman maksimal 15 detik jika audio gagal/terputus di TV
+      // Batas aman auto-dismiss 10 detik sesuai spesifikasi Smart MC
       mcDismissTimerRef.current = setTimeout(() => {
         stopSmartMcSpeech();
         stopAudioDucking();
         isMcSpeakingRef.current = false;
         setActiveMcAnnouncement(null);
+        setIsSmartMcVisible(false);
         setIsMcSpeaking(false);
         broadcastMcStatus(false);
-      }, 15000);
+      }, 10000);
 
       speakSmartMcIndonesian(
         announcement.tier,
@@ -2203,31 +2253,46 @@ export const KaraokeProvider: React.FC<{ children: React.ReactNode; initialIsTvM
           setIsMcSpeaking(false);
           broadcastMcStatus(false);
           options?.onSpeechEnd?.();
-          if (mcDismissTimerRef.current) {
-            clearTimeout(mcDismissTimerRef.current);
-            mcDismissTimerRef.current = null;
-          }
-          if (mcAudioEndWaitTimerRef.current) {
-            clearTimeout(mcAudioEndWaitTimerRef.current);
-          }
-          mcAudioEndWaitTimerRef.current = setTimeout(() => {
-            setActiveMcAnnouncement(null);
-          }, 1200);
         },
         announcement.fullSpeechText
       );
 
       if (options?.broadcast) {
-        broadcastMessage('TRIGGER_SMART_MC', {
+        const mcPayload = {
           announcement,
+          sampiran: announcement.sampiran,
+          isi: announcement.isi,
+          komentar: announcement.komentar,
+          namaVokalis: announcement.namaVokalis || announcement.singerName,
+          judulLagu: announcement.judulLagu || announcement.songTitle,
           singerName: announcement.singerName,
           songTitle: announcement.songTitle,
           score: announcement.score,
           isManual: isManualTrigger,
+        };
+        broadcastMessage('SHOW_PANTUN', mcPayload);
+        broadcastMessage('TRIGGER_SMART_MC', mcPayload);
+        broadcastToPeers({
+          action: 'SHOW_PANTUN' as any,
+          payload: mcPayload,
         });
+        broadcastToPeers({
+          action: 'TRIGGER_SMART_MC',
+          payload: mcPayload,
+        });
+        fetch('/api/room-sync', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            roomId,
+            action: 'SHOW_PANTUN',
+            announcement,
+            payload: mcPayload,
+          }),
+        }).catch(() => {});
       }
     },
-    [currentScoreData, juryVotes, defaultSingerName, currentSong, broadcastMessage, broadcastMcStatus, startAudioDucking, stopAudioDucking]
+    [currentScoreData, juryVotes, defaultSingerName, currentSong, broadcastMessage, broadcastMcStatus, startAudioDucking, stopAudioDucking, broadcastToPeers, roomId]
   );
 
   const triggerSmartMcRef = useRef(triggerSmartMc);

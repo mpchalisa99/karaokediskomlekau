@@ -64,6 +64,8 @@ export const TVStageMode: React.FC<TVStageModeProps> = ({ standalone = false }) 
     audioVolume,
     isMuted,
     triggerSmartMc,
+    dismissSmartMc,
+    isSmartMcVisible,
     connectionStatus,
     unlockTvAudio,
   } = useKaraoke();
@@ -154,9 +156,24 @@ export const TVStageMode: React.FC<TVStageModeProps> = ({ standalone = false }) 
       const keyCode = e.keyCode || e.which;
       const key = e.key;
 
-      const isEnterOrOk = keyCode === 13 || key === 'Enter';
-      const isReturnOrBack = keyCode === 10009 || key === 'Escape' || key === 'Backspace' || keyCode === 10182;
+      const isEnterOrOk = keyCode === 13 || keyCode === 23 || key === 'Enter';
+      const isReturnOrBack =
+        keyCode === 10009 ||
+        keyCode === 4 ||
+        key === 'Escape' ||
+        key === 'Backspace' ||
+        keyCode === 10182;
       const isPlayPause = keyCode === 10252 || keyCode === 415 || keyCode === 19 || keyCode === 32 || key === ' ';
+
+      // Jika popup kartu Smart MC sedang tampil di TV, tekan Back/Escape/OK/Enter langsung menutupnya
+      if (isSmartMcVisible) {
+        if (isReturnOrBack || isEnterOrOk) {
+          e.preventDefault();
+          e.stopPropagation();
+          dismissSmartMc();
+          return;
+        }
+      }
 
       if (isReturnOrBack) {
         handleExit();
@@ -169,7 +186,7 @@ export const TVStageMode: React.FC<TVStageModeProps> = ({ standalone = false }) 
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isTvMode, standalone, togglePlayPause, handleExit, unlockTvAudio]);
+  }, [isTvMode, standalone, togglePlayPause, handleExit, unlockTvAudio, isSmartMcVisible, dismissSmartMc]);
 
   // Deteksi event lagu & progres playback dari YouTube iframe untuk auto-scoring 60 detik & auto-play di TV
   useEffect(() => {
@@ -1592,6 +1609,8 @@ export const TVStageMode: React.FC<TVStageModeProps> = ({ standalone = false }) 
         {/* Kontrol Layar di Kanan */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', paddingLeft: '12px', borderLeft: '1px solid rgba(255,255,255,0.1)', flexShrink: 0, fontSize: '11px' }}>
           <button
+            id="tv-btn-pantun-mc"
+            tabIndex={0}
             onClick={() =>
               triggerSmartMc({
                 singerName: defaultSingerName,
@@ -1600,20 +1619,33 @@ export const TVStageMode: React.FC<TVStageModeProps> = ({ standalone = false }) 
                 broadcast: true,
               })
             }
+            onKeyDown={(e) => {
+              const code = e.keyCode || e.which;
+              if (code === 13 || code === 23 || e.key === 'Enter') {
+                e.preventDefault();
+                triggerSmartMc({
+                  singerName: defaultSingerName,
+                  songTitle: currentSong?.title,
+                  isManual: true,
+                  broadcast: true,
+                });
+              }
+            }}
             style={{
               display: 'flex',
               alignItems: 'center',
               gap: '4px',
               color: '#020617',
               backgroundColor: '#fbbf24',
-              border: '1px solid #fef08a',
+              border: '2px solid #fef08a',
               cursor: 'pointer',
-              padding: '3px 9px',
+              padding: '3px 10px',
               borderRadius: '6px',
               fontWeight: 900,
               fontSize: '11px',
+              outline: 'none',
             }}
-            title="Panggil Pantun Smart MC Diskomlekau"
+            title="Panggil Pantun Smart MC Diskomlekau (Tekan OK/Enter pada Remote TV)"
           >
             <span>🎙️ Pantun MC</span>
           </button>

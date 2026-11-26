@@ -31,6 +31,8 @@ interface RoomState {
   currentSinger?: string | null;
   isPlaying: boolean;
   isMcSpeaking?: boolean;
+  isSmartMcVisible?: boolean;
+  activeMcAnnouncement?: any | null;
   lastSmartMcId?: string;
   lastSmartMcAt?: number;
   queue: any[];
@@ -57,6 +59,8 @@ function getOrCreateRoom(roomId: string): RoomState {
       currentSinger: null,
       isPlaying: false,
       isMcSpeaking: false,
+      isSmartMcVisible: false,
+      activeMcAnnouncement: null,
       lastSmartMcId: undefined,
       lastSmartMcAt: 0,
       queue: [],
@@ -1036,21 +1040,222 @@ async function startServer() {
     }
     if (mcId) room.lastSmartMcId = mcId;
     room.lastSmartMcAt = now;
+    room.isSmartMcVisible = true;
+    if (announcement) room.activeMcAnnouncement = announcement;
+
+    const mcPayload = {
+      singerName: room.currentSinger || singerName || 'Prajurit (HP)',
+      songTitle: songTitle || room.currentSong?.title || 'Lagu Pilihan Prajurit',
+      score,
+      forceTier,
+      announcement,
+      sampiran: announcement?.sampiran || (announcement?.pantunLines ? [announcement.pantunLines[0], announcement.pantunLines[1]] : undefined),
+      isi: announcement?.isi || (announcement?.pantunLines ? [announcement.pantunLines[2], announcement.pantunLines[3]] : undefined),
+      komentar: announcement?.komentar || announcement?.commentary,
+      namaVokalis: room.currentSinger || singerName || 'Prajurit (HP)',
+      judulLagu: songTitle || room.currentSong?.title,
+      isManual: true,
+    };
+
+    broadcastToRoom(room, {
+      type: 'SHOW_PANTUN',
+      roomId: room.roomId,
+      payload: mcPayload,
+      timestamp: now,
+    });
 
     broadcastToRoom(room, {
       type: 'TRIGGER_SMART_MC',
       roomId: room.roomId,
-      payload: {
-        singerName: room.currentSinger || singerName || 'Prajurit (HP)',
-        songTitle: songTitle || room.currentSong?.title || 'Lagu Pilihan Prajurit',
-        score,
-        forceTier,
-        announcement,
-      },
+      payload: mcPayload,
       timestamp: now,
     });
 
-    res.json({ success: true });
+    res.json({ success: true, isSmartMcVisible: true });
+  });
+
+  // Vercel-compatible /api/room-sync endpoint for Smart TV Samsung (Tizen OS) & Android TV 13
+  app.get('/api/room-sync', (req, res) => {
+    const rawRoom = (req.query.room || req.query.roomId || 'ROOM-1001') as string;
+    const room = getOrCreateRoom(rawRoom);
+    return res.json({
+      success: true,
+      roomId: room.roomId,
+      room: {
+        roomId: room.roomId,
+        nowPlaying: room.currentSong,
+        currentSong: room.currentSong,
+        currentSinger: room.currentSinger ?? null,
+        isPlaying: room.isPlaying,
+        queue: room.queue,
+        isMcSpeaking: Boolean(room.isMcSpeaking),
+        isSmartMcVisible: Boolean(room.isSmartMcVisible),
+        activeMcAnnouncement: room.activeMcAnnouncement ?? null,
+        musicDelayMs: room.musicDelayMs ?? 70,
+        musicVolume: room.musicVolume ?? 100,
+        isMuted: room.isMuted ?? false,
+        clientCount: room.clients.size,
+        juryVotes: Array.from(room.juryVotes.values()),
+        lastUpdated: room.lastUpdated,
+      },
+    });
+  });
+
+  app.post('/api/room-sync', (req, res) => {
+    const body = req.body || {};
+    const { roomId, action, song, singerName, priority, queueId, payload, announcement } = body;
+    const room = getOrCreateRoom(roomId || payload?.roomId);
+    const cleanSinger = (singerName || payload?.singerName || 'Prajurit (HP)').trim();
+    const now = Date.now();
+
+    switch (action) {
+      case 'ADD_QUEUE': {
+        if (!song || !song.id) {
+          return res.status(400).json({ success: false, error: 'Data lagu tidak valid' });
+        }
+        const { item, isCurrent } = addSongToRoomQueue(room, song, cleanSinger, !!(priority || payload?.priority), queueId || payload?.queueId);
+        return res.json({
+          success: true,
+          action,
+          item,
+          isCurrent,
+          room: {
+            roomId: room.roomId,
+            nowPlaying: room.currentSong,
+            currentSong: room.currentSong,
+            currentSinger: room.currentSinger ?? null,
+            isPlaying: room.isPlaying,
+            queue: room.queue,
+            lastUpdated: room.lastUpdated,
+          },
+        });
+      }
+
+      case 'PLAY_NOW': {
+        if (song && song.id) {
+          room.currentSong = song;
+          room.currentSinger = cleanSinger;
+          room.isPlaying = true;
+          room.lastUpdated = now;
+          broadcastToRoom(room, {
+            type: 'PLAY_NOW',
+            roomId: room.roomId,
+            payload: { song, singerName: cleanSinger },
+            timestamp: now,
+          });
+          broadcastToRoom(room, {
+            type: 'STATE_UPDATE',
+            roomId: room.roomId,
+            payload: {
+              currentSong: room.currentSong,
+              currentSinger: room.currentSinger,
+              isPlaying: true,
+              queue: room.queue,
+              clientCount: room.clients.size,
+            },
+            timestamp: now,
+          });
+        }
+        break;
+      }
+
+      case 'SKIP_NEXT': {
+        if (room.queue.length > 0) {
+          const next = room.queue.shift();
+          if (next) {
+            room.currentSong = next.song;
+            room.currentSinger = next.singerName;
+            room.isPlaying = true;
+          }
+        } else {
+          room.currentSong = null;
+          room.currentSinger = null;
+          room.isPlaying = false;
+        }
+        room.lastUpdated = now;
+        broadcastToRoom(room, {
+          type: 'SKIP_NEXT',
+          roomId: room.roomId,
+          payload: { currentSong: room.currentSong, currentSinger: room.currentSinger, queue: room.queue },
+          timestamp: now,
+        });
+        break;
+      }
+
+      case 'SHOW_PANTUN':
+      case 'TRIGGER_SMART_MC': {
+        const resolvedAnnouncement = announcement || payload?.announcement;
+        room.isSmartMcVisible = true;
+        if (resolvedAnnouncement) {
+          room.activeMcAnnouncement = resolvedAnnouncement;
+          room.lastSmartMcId = resolvedAnnouncement.id;
+        }
+        room.lastSmartMcAt = now;
+        const mcPayload = {
+          ...(payload || {}),
+          announcement: resolvedAnnouncement,
+          sampiran: resolvedAnnouncement?.sampiran || (resolvedAnnouncement?.pantunLines ? [resolvedAnnouncement.pantunLines[0], resolvedAnnouncement.pantunLines[1]] : undefined),
+          isi: resolvedAnnouncement?.isi || (resolvedAnnouncement?.pantunLines ? [resolvedAnnouncement.pantunLines[2], resolvedAnnouncement.pantunLines[3]] : undefined),
+          komentar: resolvedAnnouncement?.komentar || resolvedAnnouncement?.commentary,
+          namaVokalis: resolvedAnnouncement?.namaVokalis || cleanSinger,
+          judulLagu: resolvedAnnouncement?.judulLagu || song?.title,
+          singerName: room.currentSinger || cleanSinger,
+          songTitle: song?.title || room.currentSong?.title,
+          isManual: true,
+        };
+        broadcastToRoom(room, {
+          type: 'SHOW_PANTUN',
+          roomId: room.roomId,
+          payload: mcPayload,
+          timestamp: now,
+        });
+        broadcastToRoom(room, {
+          type: 'TRIGGER_SMART_MC',
+          roomId: room.roomId,
+          payload: mcPayload,
+          timestamp: now,
+        });
+        break;
+      }
+
+      case 'DISMISS_SMART_MC': {
+        room.isSmartMcVisible = false;
+        broadcastToRoom(room, {
+          type: 'SMART_MC_STATUS',
+          roomId: room.roomId,
+          payload: { isSpeaking: false, isVisible: false },
+          timestamp: now,
+        });
+        break;
+      }
+
+      case 'SYNC_STATE': {
+        if (payload?.currentSong !== undefined) room.currentSong = payload.currentSong;
+        if (payload?.currentSinger !== undefined) room.currentSinger = payload.currentSinger;
+        if (typeof payload?.isPlaying === 'boolean') room.isPlaying = payload.isPlaying;
+        if (Array.isArray(payload?.queue)) room.queue = payload.queue;
+        if (typeof payload?.isSmartMcVisible === 'boolean') room.isSmartMcVisible = payload.isSmartMcVisible;
+        if (payload?.activeMcAnnouncement !== undefined) room.activeMcAnnouncement = payload.activeMcAnnouncement;
+        room.lastUpdated = now;
+        break;
+      }
+    }
+
+    return res.json({
+      success: true,
+      action,
+      room: {
+        roomId: room.roomId,
+        nowPlaying: room.currentSong,
+        currentSong: room.currentSong,
+        currentSinger: room.currentSinger ?? null,
+        isPlaying: room.isPlaying,
+        isSmartMcVisible: Boolean(room.isSmartMcVisible),
+        activeMcAnnouncement: room.activeMcAnnouncement ?? null,
+        queue: room.queue,
+        lastUpdated: room.lastUpdated,
+      },
+    });
   });
 
   // Server-Sent Events (SSE) fallback stream
@@ -1440,6 +1645,7 @@ async function startServer() {
             break;
           }
 
+          case 'SHOW_PANTUN':
           case 'TRIGGER_SMART_MC': {
             const now = Date.now();
             const mcId = msg.payload?.announcement?.id;
@@ -1448,15 +1654,36 @@ async function startServer() {
             }
             if (mcId) room.lastSmartMcId = mcId;
             room.lastSmartMcAt = now;
+            room.isSmartMcVisible = true;
+            if (msg.payload?.announcement) {
+              room.activeMcAnnouncement = msg.payload.announcement;
+            }
+
+            const announcement = msg.payload?.announcement;
+            const cleanSinger = room.currentSinger || msg.payload?.singerName || singerName;
+            const mcPayload = {
+              ...(msg.payload || {}),
+              singerName: cleanSinger,
+              senderName: msg.payload?.senderName || msg.payload?.singerName || singerName,
+              sampiran: msg.payload?.sampiran || announcement?.sampiran || (announcement?.pantunLines ? [announcement.pantunLines[0], announcement.pantunLines[1]] : undefined),
+              isi: msg.payload?.isi || announcement?.isi || (announcement?.pantunLines ? [announcement.pantunLines[2], announcement.pantunLines[3]] : undefined),
+              komentar: msg.payload?.komentar || announcement?.komentar || announcement?.commentary,
+              namaVokalis: msg.payload?.namaVokalis || announcement?.namaVokalis || cleanSinger,
+              judulLagu: msg.payload?.judulLagu || announcement?.judulLagu || msg.payload?.songTitle || room.currentSong?.title,
+              isManual: true,
+            };
+
+            broadcastToRoom(room, {
+              type: 'SHOW_PANTUN',
+              roomId: room.roomId,
+              payload: mcPayload,
+              timestamp: now,
+            });
 
             broadcastToRoom(room, {
               type: 'TRIGGER_SMART_MC',
               roomId: room.roomId,
-              payload: {
-                ...(msg.payload || {}),
-                singerName: room.currentSinger || msg.payload?.singerName || singerName,
-                senderName: msg.payload?.senderName || msg.payload?.singerName || singerName,
-              },
+              payload: mcPayload,
               timestamp: now,
             });
             break;

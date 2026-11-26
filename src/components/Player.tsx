@@ -98,6 +98,7 @@ export const Player: React.FC = () => {
           playsinline: 1,
           enablejsapi: 1,
           iv_load_policy: 3,
+          wmode: 'opaque',
           origin: window.location.origin,
         },
         events: {

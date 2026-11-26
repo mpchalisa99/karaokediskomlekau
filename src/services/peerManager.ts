@@ -24,7 +24,8 @@ export type PeerAction =
   | 'SET_MUSIC_DELAY'
   | 'SUBMIT_JURY_SCORE'
   | 'SYNC_JURY_SCORES'
-  | 'TRIGGER_SMART_MC';
+  | 'TRIGGER_SMART_MC'
+  | 'SHOW_PANTUN';
 
 export interface PeerMessage {
   action: PeerAction;

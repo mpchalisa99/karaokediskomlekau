@@ -556,7 +556,11 @@ export function generateSmartMcAnnouncement(options: GenerateSmartMcOptions = {}
       .replace(/\{score\}/g, String(numericScore));
 
   const pantunLines = chosen.pantunLines.map(interpolate) as [string, string, string, string];
-  // Narasi MC ringkas: HANYA vokalis yang memilih lagu, judul lagu, dan pantun
+  const commentary = chosen.commentaryTemplate ? interpolate(chosen.commentaryTemplate) : '';
+  const sampiran: [string, string] = [pantunLines[0], pantunLines[1]];
+  const isi: [string, string] = [pantunLines[2], pantunLines[3]];
+
+  // Narasi audio MC ringkas: HANYA vokalis yang memilih lagu, judul lagu, dan pantun
   const fullSpeechText = `Vokalis ${cleanSinger}, lagu ${cleanSong}. ${pantunLines.join(', ')}.`;
 
   return {
@@ -564,7 +568,12 @@ export function generateSmartMcAnnouncement(options: GenerateSmartMcOptions = {}
     tier,
     badge: chosen.badge,
     pantunLines,
-    commentary: '',
+    sampiran,
+    isi,
+    komentar: commentary,
+    namaVokalis: cleanSinger,
+    judulLagu: cleanSong,
+    commentary,
     fullSpeechText,
     singerName: cleanSinger,
     songTitle: cleanSong,
