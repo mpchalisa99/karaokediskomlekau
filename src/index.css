@@ -646,5 +646,64 @@ body.tv-mode-active * {
   -webkit-backdrop-filter: none !important;
 }
 
+/* =========================================================================
+   SMART MC WANITA TNI AU CHARACTER ANIMATIONS (GPU-Composited Transform/Opacity)
+   ========================================================================= */
+@keyframes mcFloatGentle {
+  0%, 100% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(0, -4px, 0) scale(1.008);
+  }
+}
 
+@keyframes mcSpeakPulse {
+  0%, 100% {
+    transform: translate3d(0, 0, 0) scale(1) rotate(0deg);
+  }
+  25% {
+    transform: translate3d(0, -5px, 0) scale(1.018) rotate(-0.6deg);
+  }
+  50% {
+    transform: translate3d(0, -2px, 0) scale(1.008) rotate(0.4deg);
+  }
+  75% {
+    transform: translate3d(0, -6px, 0) scale(1.02) rotate(0deg);
+  }
+}
 
+@keyframes mcHudPulseDot {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.45;
+    transform: scale(1.3);
+  }
+}
+
+.mc-character-float {
+  animation: mcFloatGentle 4s ease-in-out infinite;
+  will-change: transform;
+}
+
+.mc-character-speaking {
+  animation: mcSpeakPulse 1.35s ease-in-out infinite;
+  will-change: transform;
+}
+
+.mc-hud-pulse-dot {
+  animation: mcHudPulseDot 1.1s ease-in-out infinite;
+  will-change: transform, opacity;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mc-character-float,
+  .mc-character-speaking,
+  .mc-hud-pulse-dot {
+    animation: none !important;
+    transform: none !important;
+  }
+}

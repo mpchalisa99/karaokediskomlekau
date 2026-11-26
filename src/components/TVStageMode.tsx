@@ -79,45 +79,68 @@ export const TVStageMode: React.FC<TVStageModeProps> = ({ standalone = false }) 
 
   // Auto trigger native Fullscreen & Screen Wake Lock immediately on mount for Samsung Smart TV (Tizen OS)
   useEffect(() => {
-    const cleanup = autoTriggerSmartTvFullscreen();
-    requestScreenWakeLock().then((locked) => setWakeLockActive(locked));
+    let cleanup = () => {};
+    try {
+      cleanup = autoTriggerSmartTvFullscreen();
+    } catch {}
+    try {
+      requestScreenWakeLock()
+        .then((locked) => setWakeLockActive(locked))
+        .catch(() => {});
+    } catch {}
     return () => {
-      cleanup();
+      try {
+        cleanup();
+      } catch {}
     };
   }, []);
 
   // Fetch server detected IP/hostname on mount
   useEffect(() => {
-    fetchServerNetworkInfo().then((info) => {
-      if (info) setNetworkInfo(info);
-    });
+    fetchServerNetworkInfo()
+      .then((info) => {
+        if (info) setNetworkInfo(info);
+      })
+      .catch(() => {});
   }, []);
 
   // Monitor fullscreen state across TV vendor prefixes (WebKit / Tizen / webOS)
   useEffect(() => {
-    setIsFullscreen(isFullScreenActive());
-    return addFullScreenChangeListener((active) => {
-      setIsFullscreen(active);
-    });
+    try {
+      setIsFullscreen(isFullScreenActive());
+      return addFullScreenChangeListener((active) => {
+        setIsFullscreen(active);
+      });
+    } catch {
+      return () => {};
+    }
   }, []);
 
   // Ensure TV mode CSS classes on document element and body
   useEffect(() => {
-    document.documentElement.classList.add('tv-mode-active');
-    document.body.classList.add('tv-mode-active');
+    try {
+      document.documentElement.classList.add('tv-mode-active');
+      document.body.classList.add('tv-mode-active');
+    } catch {}
     return () => {
-      document.documentElement.classList.remove('tv-mode-active');
-      document.body.classList.remove('tv-mode-active');
-      releaseScreenWakeLock();
+      try {
+        document.documentElement.classList.remove('tv-mode-active');
+        document.body.classList.remove('tv-mode-active');
+        releaseScreenWakeLock();
+      } catch {}
     };
   }, []);
 
   // Re-acquire Screen Wake Lock when window gains focus
   useEffect(() => {
     const handleVisibility = () => {
-      if (document.visibilityState === 'visible') {
-        requestScreenWakeLock().then((locked) => setWakeLockActive(locked));
-      }
+      try {
+        if (document.visibilityState === 'visible') {
+          requestScreenWakeLock()
+            .then((locked) => setWakeLockActive(locked))
+            .catch(() => {});
+        }
+      } catch {}
     };
 
     document.addEventListener('visibilitychange', handleVisibility);
@@ -138,7 +161,9 @@ export const TVStageMode: React.FC<TVStageModeProps> = ({ standalone = false }) 
   }, [activeReactions]);
 
   const handleExit = useCallback(() => {
-    releaseScreenWakeLock();
+    try {
+      releaseScreenWakeLock();
+    } catch {}
     if (standalone) {
       window.location.href = `/?room=${encodeURIComponent(roomId)}`;
     } else {
@@ -151,7 +176,9 @@ export const TVStageMode: React.FC<TVStageModeProps> = ({ standalone = false }) 
     if (!isTvMode && !standalone) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      unlockTvAudio();
+      try {
+        unlockTvAudio();
+      } catch {}
       const keyCode = e.keyCode || e.which;
       const key = e.key;
 
@@ -179,7 +206,9 @@ export const TVStageMode: React.FC<TVStageModeProps> = ({ standalone = false }) 
       } else if (isPlayPause) {
         togglePlayPause(true);
       } else if (isEnterOrOk || key === 'f' || key === 'F') {
-        toggleFullScreen();
+        try {
+          toggleFullScreen();
+        } catch {}
       }
     };
 
@@ -304,7 +333,11 @@ export const TVStageMode: React.FC<TVStageModeProps> = ({ standalone = false }) 
       {/* Tombol banner mengambang jika browser Smart TV belum layar penuh */}
       {!isFullscreen && (
         <div
-          onClick={() => enterFullScreen()}
+          onClick={() => {
+            try {
+              enterFullScreen().catch(() => false);
+            } catch {}
+          }}
           style={{
             position: 'fixed',
             top: '8px',

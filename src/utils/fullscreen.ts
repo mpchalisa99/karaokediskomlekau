@@ -176,10 +176,12 @@ export async function requestScreenWakeLock(): Promise<boolean> {
   if ('wakeLock' in navigator && (navigator as any).wakeLock) {
     try {
       wakeLockSentinel = await (navigator as any).wakeLock.request('screen');
-      if (wakeLockSentinel) {
-        wakeLockSentinel.addEventListener('release', () => {
-          wakeLockSentinel = null;
-        });
+      if (wakeLockSentinel && typeof wakeLockSentinel.addEventListener === 'function') {
+        try {
+          wakeLockSentinel.addEventListener('release', () => {
+            wakeLockSentinel = null;
+          });
+        } catch {}
       }
       return true;
     } catch (err) {
@@ -242,46 +244,64 @@ export function autoTriggerSmartTvFullscreen(targetEl?: Element): () => void {
   }
 
   // 2. Immediate programmatic fullscreen attempt
-  enterFullScreen(targetEl);
-  requestScreenWakeLock();
+  try {
+    enterFullScreen(targetEl).catch(() => false);
+  } catch {}
+  try {
+    requestScreenWakeLock().catch(() => false);
+  } catch {}
 
   // 3. Staggered retries to guarantee fullscreen once the TV browser viewport has rendered
   const timers = [
     setTimeout(() => {
-      if (!isFullScreenActive()) enterFullScreen(targetEl);
+      try {
+        if (!isFullScreenActive()) enterFullScreen(targetEl).catch(() => false);
+      } catch {}
     }, 100),
     setTimeout(() => {
-      if (!isFullScreenActive()) enterFullScreen(targetEl);
-      requestScreenWakeLock();
+      try {
+        if (!isFullScreenActive()) enterFullScreen(targetEl).catch(() => false);
+        requestScreenWakeLock().catch(() => false);
+      } catch {}
     }, 350),
     setTimeout(() => {
-      if (!isFullScreenActive()) enterFullScreen(targetEl);
+      try {
+        if (!isFullScreenActive()) enterFullScreen(targetEl).catch(() => false);
+      } catch {}
     }, 800),
     setTimeout(() => {
-      if (!isFullScreenActive()) enterFullScreen(targetEl);
+      try {
+        if (!isFullScreenActive()) enterFullScreen(targetEl).catch(() => false);
+      } catch {}
     }, 1500),
   ];
 
   // 4. Transparent fallback: on the very first TV remote button press or interaction,
   // ensure the TV is in fullscreen invisibly without any popup or modal.
   const handleAnyInteraction = () => {
-    if (!isFullScreenActive()) {
-      enterFullScreen(targetEl);
-    }
-    requestScreenWakeLock();
+    try {
+      if (!isFullScreenActive()) {
+        enterFullScreen(targetEl).catch(() => false);
+      }
+      requestScreenWakeLock().catch(() => false);
+    } catch {}
   };
 
   const events = ['keydown', 'pointerdown', 'touchstart', 'click'];
   events.forEach((evt) => {
-    window.addEventListener(evt, handleAnyInteraction, { capture: true, passive: true });
-    document.addEventListener(evt, handleAnyInteraction, { capture: true, passive: true });
+    try {
+      window.addEventListener(evt, handleAnyInteraction, { capture: true, passive: true });
+      document.addEventListener(evt, handleAnyInteraction, { capture: true, passive: true });
+    } catch {}
   });
 
   return () => {
     timers.forEach((t) => clearTimeout(t));
     events.forEach((evt) => {
-      window.removeEventListener(evt, handleAnyInteraction, { capture: true } as any);
-      document.removeEventListener(evt, handleAnyInteraction, { capture: true } as any);
+      try {
+        window.removeEventListener(evt, handleAnyInteraction, { capture: true } as any);
+        document.removeEventListener(evt, handleAnyInteraction, { capture: true } as any);
+      } catch {}
     });
   };
 }

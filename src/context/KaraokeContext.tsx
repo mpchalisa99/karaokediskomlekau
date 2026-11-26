@@ -3,7 +3,15 @@ import confetti from 'canvas-confetti';
 import { Song, QueueItem, SuffixFilter, WebSocketMessage, RemoteClientInfo, RemoteNotification, SongScoreData, ScreenReaction, SoundFxType, JuryVote, JuryScoreSummary, getScoreQuote, SmartMcAnnouncement, SmartMcTier, ConnectionStatus } from '../types/karaoke';
 import { searchKaraokeSongs, CURATED_LIBRARY, CATEGORY_PRESETS, extractYoutubeVideoId, fetchOEmbedInfo, getHitsIndonesiaSongs, getHitsIndonesiaLastUpdated, refreshIndonesianTrendingHits } from '../services/youtube';
 import { audioFx } from '../services/audioFx';
-import { generateSmartMcAnnouncement, speakSmartMcIndonesian, stopSmartMcSpeech, unlockSmartMcAudio, isSmartMcPlaying } from '../services/smartMc';
+import {
+  generateSmartMcAnnouncement,
+  speakSmartMcIndonesian,
+  stopSmartMcSpeech,
+  unlockSmartMcAudio,
+  isSmartMcPlaying,
+  calculateSmartMcDisplayDurationMs,
+  isBrowserSpeechSpeaking,
+} from '../services/smartMc';
 import { useWebRTCAudioReceiver, ActiveWirelessMic } from '../hooks/useWebRTCAudioReceiver';
 import { useKaraokeScoring, LiveScoringState } from '../hooks/useKaraokeScoring';
 import { getSignalingWebSocketUrl } from '../services/signaling';
@@ -92,7 +100,7 @@ interface KaraokeContextType {
     broadcast?: boolean;
     isManual?: boolean;
     nextSongTitle?: string;
-    onSpeechEnd?: () => void;
+    onSpeechEnd?: (usedRealSpeech?: boolean) => void;
   }) => void;
   replaySmartMcSpeech: () => void;
   dismissSmartMc: () => void;
@@ -272,7 +280,6 @@ export const KaraokeProvider: React.FC<{ children: React.ReactNode; initialIsTvM
   const processedMcIdsRef = useRef<Set<string>>(new Set());
   const mcDismissTimerRef = useRef<any>(null);
   const mcAudioEndWaitTimerRef = useRef<any>(null);
-  const mcRevealFallbackTimerRef = useRef<any>(null);
   const endTransitionTimerRef = useRef<any>(null);
   const isAwaitingEndTransitionQueueSkipRef = useRef<boolean>(false);
   const lastMcTriggerTimeRef = useRef<number>(0);
@@ -366,15 +373,15 @@ export const KaraokeProvider: React.FC<{ children: React.ReactNode; initialIsTvM
     }
   }, []);
 
-  // Audio Ducking: kecilkan musik karaoke secara jelas saat Smart MC berbicara, lalu kembalikan ke volume asal
+  // Audio Ducking: kecilkan sementara musik karaoke saat Smart MC berbicara, lalu kembalikan ke volume asal
   const startAudioDucking = useCallback(() => {
     if (!isDuckingRef.current) {
       preDuckVolumeRef.current = audioVolumeRef.current;
       isDuckingRef.current = true;
     }
-    const duckedVol = Math.max(10, Math.round(preDuckVolumeRef.current * 0.18));
+    const duckedVol = Math.max(15, Math.round(preDuckVolumeRef.current * 0.25));
     applyHardwarePlayerVolume(duckedVol, isMutedRef.current);
-    setMusicBoostMultiplier(0.25);
+    setMusicBoostMultiplier(0.35);
   }, [applyHardwarePlayerVolume, setMusicBoostMultiplier]);
 
   const stopAudioDucking = useCallback(() => {
@@ -1035,6 +1042,7 @@ export const KaraokeProvider: React.FC<{ children: React.ReactNode; initialIsTvM
                   announcement.namaVokalis = singer;
                   announcement.judulLagu = song;
 
+                  setIsSmartMcVisible(true);
                   triggerSmartMcRef.current({
                     singerName: singer,
                     songTitle: song,
@@ -1170,6 +1178,7 @@ export const KaraokeProvider: React.FC<{ children: React.ReactNode; initialIsTvM
                 if (data.payload?.komentar) announcement.komentar = data.payload.komentar;
                 announcement.namaVokalis = singer;
                 announcement.judulLagu = song;
+                setIsSmartMcVisible(true);
                 triggerSmartMcRef.current({
                   singerName: singer,
                   songTitle: song,
@@ -1359,6 +1368,7 @@ export const KaraokeProvider: React.FC<{ children: React.ReactNode; initialIsTvM
         if (serverRoom.isSmartMcVisible && serverRoom.activeMcAnnouncement?.id) {
           const mcAnn = serverRoom.activeMcAnnouncement;
           if (!processedMcIdsRef.current.has(mcAnn.id) && !isMcSpeakingRef.current && !isSmartMcPlaying()) {
+            setIsSmartMcVisible(true);
             triggerSmartMcRef.current({
               singerName: mcAnn.namaVokalis || mcAnn.singerName || currentSingerNameRef.current || defaultSingerName,
               songTitle: mcAnn.judulLagu || mcAnn.songTitle || currentSongRef.current?.title,
@@ -1498,6 +1508,7 @@ export const KaraokeProvider: React.FC<{ children: React.ReactNode; initialIsTvM
               if (msg.payload?.komentar) announcement.komentar = msg.payload.komentar;
               announcement.namaVokalis = singer;
               announcement.judulLagu = song;
+              setIsSmartMcVisible(true);
               triggerSmartMcRef.current({
                 singerName: singer,
                 songTitle: song,
@@ -2020,10 +2031,6 @@ export const KaraokeProvider: React.FC<{ children: React.ReactNode; initialIsTvM
       clearTimeout(mcAudioEndWaitTimerRef.current);
       mcAudioEndWaitTimerRef.current = null;
     }
-    if (mcRevealFallbackTimerRef.current) {
-      clearTimeout(mcRevealFallbackTimerRef.current);
-      mcRevealFallbackTimerRef.current = null;
-    }
     if (endTransitionTimerRef.current) {
       clearTimeout(endTransitionTimerRef.current);
       endTransitionTimerRef.current = null;
@@ -2382,17 +2389,35 @@ export const KaraokeProvider: React.FC<{ children: React.ReactNode; initialIsTvM
 
     isMcSpeakingRef.current = true;
     setIsMcSpeaking(true);
-    broadcastMcStatus(true);
+    try {
+      broadcastMcStatus(true);
+    } catch {}
 
-    // Batas aman maksimal 15 detik agar lock/banner tidak pernah menyangkut
-    mcDismissTimerRef.current = setTimeout(() => {
-      stopSmartMcSpeech();
-      stopAudioDucking();
-      isMcSpeakingRef.current = false;
-      setActiveMcAnnouncement(null);
-      setIsMcSpeaking(false);
-      broadcastMcStatus(false);
-    }, 15000);
+    const readingDurationMs = calculateSmartMcDisplayDurationMs(activeMcAnnouncement);
+    const startedAt = Date.now();
+    const scheduleReplayClose = (delayMs: number) => {
+      if (mcDismissTimerRef.current) {
+        clearTimeout(mcDismissTimerRef.current);
+      }
+      mcDismissTimerRef.current = setTimeout(() => {
+        const elapsed = Date.now() - startedAt;
+        if ((isMcSpeakingRef.current || isSmartMcPlaying() || isBrowserSpeechSpeaking()) && elapsed < 48000) {
+          scheduleReplayClose(3000);
+          return;
+        }
+        stopSmartMcSpeech();
+        stopAudioDucking();
+        isMcSpeakingRef.current = false;
+        setIsSmartMcVisible(false);
+        setActiveMcAnnouncement(null);
+        setIsMcSpeaking(false);
+        try {
+          broadcastMcStatus(false);
+        } catch {}
+      }, delayMs);
+    };
+
+    scheduleReplayClose(readingDurationMs);
 
     speakSmartMcIndonesian(
       activeMcAnnouncement.tier,
@@ -2401,21 +2426,29 @@ export const KaraokeProvider: React.FC<{ children: React.ReactNode; initialIsTvM
         isMcSpeakingRef.current = true;
         setIsMcSpeaking(true);
       },
-      () => {
+      (usedRealSpeech = false) => {
         stopAudioDucking();
         isMcSpeakingRef.current = false;
         setIsMcSpeaking(false);
-        broadcastMcStatus(false);
-        if (mcDismissTimerRef.current) {
-          clearTimeout(mcDismissTimerRef.current);
-          mcDismissTimerRef.current = null;
+        try {
+          broadcastMcStatus(false);
+        } catch {}
+
+        // Jika suara TTS asli selesai dibacakan, beri jeda aman 2.5 detik lalu tutup
+        // Jika TTS diblokir/fallback non-suara, biarkan timer dinamis menjaga papan agar tetap terbaca utuh
+        if (usedRealSpeech) {
+          if (mcDismissTimerRef.current) {
+            clearTimeout(mcDismissTimerRef.current);
+            mcDismissTimerRef.current = null;
+          }
+          if (mcAudioEndWaitTimerRef.current) {
+            clearTimeout(mcAudioEndWaitTimerRef.current);
+          }
+          mcAudioEndWaitTimerRef.current = setTimeout(() => {
+            setIsSmartMcVisible(false);
+            setActiveMcAnnouncement(null);
+          }, 2500);
         }
-        if (mcAudioEndWaitTimerRef.current) {
-          clearTimeout(mcAudioEndWaitTimerRef.current);
-        }
-        mcAudioEndWaitTimerRef.current = setTimeout(() => {
-          setActiveMcAnnouncement(null);
-        }, 1200);
       },
       activeMcAnnouncement.fullSpeechText
     );
@@ -2432,7 +2465,7 @@ export const KaraokeProvider: React.FC<{ children: React.ReactNode; initialIsTvM
       broadcast?: boolean;
       isManual?: boolean;
       nextSongTitle?: string;
-      onSpeechEnd?: () => void;
+      onSpeechEnd?: (usedRealSpeech?: boolean) => void;
     }) => {
       const isManualTrigger = Boolean(options?.isManual || options?.announcement?.isManual);
 
@@ -2444,8 +2477,11 @@ export const KaraokeProvider: React.FC<{ children: React.ReactNode; initialIsTvM
         stopAudioDucking();
         isMcSpeakingRef.current = false;
         setIsMcSpeaking(false);
+        setIsSmartMcVisible(false);
         setActiveMcAnnouncement(null);
-        broadcastMcStatus(false);
+        try {
+          broadcastMcStatus(false);
+        } catch {}
         return;
       }
 
@@ -2495,6 +2531,7 @@ export const KaraokeProvider: React.FC<{ children: React.ReactNode; initialIsTvM
         if (oldest) processedMcIdsRef.current.delete(oldest);
       }
 
+      // Bersihkan timer pantun sebelumnya agar tidak mempercepat penutupan pantun baru
       if (mcDismissTimerRef.current) {
         clearTimeout(mcDismissTimerRef.current);
         mcDismissTimerRef.current = null;
@@ -2503,64 +2540,75 @@ export const KaraokeProvider: React.FC<{ children: React.ReactNode; initialIsTvM
         clearTimeout(mcAudioEndWaitTimerRef.current);
         mcAudioEndWaitTimerRef.current = null;
       }
-      if (mcRevealFallbackTimerRef.current) {
-        clearTimeout(mcRevealFallbackTimerRef.current);
-        mcRevealFallbackTimerRef.current = null;
-      }
 
-      // Kunci langsung secara sinkron sebelum audio dimuat agar tidak ada panggilan kedua yang menembus
+      // Kunci langsung secara sinkron sebelum audio diputar agar tidak ada panggilan kedua yang menembus
       isMcSpeakingRef.current = true;
       setIsMcSpeaking(true);
-
-      let popupRevealed = false;
-      const revealPopupAndAudioTogether = () => {
-        if (popupRevealed || !isMcSpeakingRef.current) return;
-        popupRevealed = true;
-        if (mcRevealFallbackTimerRef.current) {
-          clearTimeout(mcRevealFallbackTimerRef.current);
-          mcRevealFallbackTimerRef.current = null;
-        }
-        startAudioDucking();
-        setActiveMcAnnouncement(announcement);
-        setIsSmartMcVisible(true);
-        setIsMcSpeaking(true);
+      setActiveMcAnnouncement(announcement);
+      setIsSmartMcVisible(true);
+      try {
         broadcastMcStatus(true);
+      } catch {}
 
+      // Durasi tampil dinamis berdasarkan panjang teks pantun lengkap (18.5s - 40s),
+      // dan otomatis menunggu jika suara TTS masih aktif berbicara hingga batas aman 48s.
+      const readingDurationMs = calculateSmartMcDisplayDurationMs(announcement);
+      const startedAt = Date.now();
+      const scheduleAutoClose = (delayMs: number) => {
         if (mcDismissTimerRef.current) {
           clearTimeout(mcDismissTimerRef.current);
         }
-        // Auto-dismiss 10 detik dimulai tepat saat pantun dan suara muncul bersamaan
         mcDismissTimerRef.current = setTimeout(() => {
+          const elapsed = Date.now() - startedAt;
+          if ((isMcSpeakingRef.current || isSmartMcPlaying() || isBrowserSpeechSpeaking()) && elapsed < 48000) {
+            scheduleAutoClose(3000);
+            return;
+          }
           stopSmartMcSpeech();
           stopAudioDucking();
           isMcSpeakingRef.current = false;
           setActiveMcAnnouncement(null);
           setIsSmartMcVisible(false);
           setIsMcSpeaking(false);
-          broadcastMcStatus(false);
-        }, 10000);
+          try {
+            broadcastMcStatus(false);
+          } catch {}
+        }, delayMs);
       };
 
-      // Safety fallback jika perangkat sama sekali tidak mengizinkan audio agar kartu tidak tertahan
-      mcRevealFallbackTimerRef.current = setTimeout(() => {
-        revealPopupAndAudioTogether();
-      }, 3000);
+      scheduleAutoClose(readingDurationMs);
 
       speakSmartMcIndonesian(
         announcement.tier,
         () => {
-          revealPopupAndAudioTogether();
+          startAudioDucking();
+          isMcSpeakingRef.current = true;
+          setIsMcSpeaking(true);
         },
-        () => {
-          if (mcRevealFallbackTimerRef.current) {
-            clearTimeout(mcRevealFallbackTimerRef.current);
-            mcRevealFallbackTimerRef.current = null;
-          }
+        (usedRealSpeech = false) => {
           stopAudioDucking();
           isMcSpeakingRef.current = false;
           setIsMcSpeaking(false);
-          broadcastMcStatus(false);
-          options?.onSpeechEnd?.();
+          try {
+            broadcastMcStatus(false);
+          } catch {}
+
+          options?.onSpeechEnd?.(usedRealSpeech);
+
+          // Jika suara TTS/MC selesai membacakan pantun, tahan papan selama 2.5 detik jeda aman sebelum ditutup
+          if (usedRealSpeech && !options?.onSpeechEnd) {
+            if (mcDismissTimerRef.current) {
+              clearTimeout(mcDismissTimerRef.current);
+              mcDismissTimerRef.current = null;
+            }
+            if (mcAudioEndWaitTimerRef.current) {
+              clearTimeout(mcAudioEndWaitTimerRef.current);
+            }
+            mcAudioEndWaitTimerRef.current = setTimeout(() => {
+              setIsSmartMcVisible(false);
+              setActiveMcAnnouncement(null);
+            }, 2500);
+          }
         },
         announcement.fullSpeechText
       );
@@ -2578,16 +2626,20 @@ export const KaraokeProvider: React.FC<{ children: React.ReactNode; initialIsTvM
           score: announcement.score,
           isManual: isManualTrigger,
         };
-        broadcastMessage('SHOW_PANTUN', mcPayload);
-        broadcastMessage('TRIGGER_SMART_MC', mcPayload);
-        broadcastToPeers({
-          action: 'SHOW_PANTUN' as any,
-          payload: mcPayload,
-        });
-        broadcastToPeers({
-          action: 'TRIGGER_SMART_MC',
-          payload: mcPayload,
-        });
+        try {
+          broadcastMessage('SHOW_PANTUN', mcPayload);
+          broadcastMessage('TRIGGER_SMART_MC', mcPayload);
+        } catch {}
+        try {
+          broadcastToPeers({
+            action: 'SHOW_PANTUN' as any,
+            payload: mcPayload,
+          });
+          broadcastToPeers({
+            action: 'TRIGGER_SMART_MC',
+            payload: mcPayload,
+          });
+        } catch {}
         fetch('/api/room-sync', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -2703,8 +2755,14 @@ export const KaraokeProvider: React.FC<{ children: React.ReactNode; initialIsTvM
         if (endTransitionTimerRef.current) {
           clearTimeout(endTransitionTimerRef.current);
         }
-        // Fallback batas waktu transisi (12 detik) jika audio TTS/lokal selesai atau macet
-        endTransitionTimerRef.current = setTimeout(proceedToNextSong, 12000);
+        // Fallback batas waktu transisi dinamis (min 20 detik, maks 42 detik) agar pantun selesai dibacakan/terbaca utuh
+        endTransitionTimerRef.current = setTimeout(() => {
+          if (isMcSpeakingRef.current || isSmartMcPlaying() || isBrowserSpeechSpeaking()) {
+            endTransitionTimerRef.current = setTimeout(proceedToNextSong, 5000);
+            return;
+          }
+          proceedToNextSong();
+        }, 22000);
 
         triggerSmartMcRef.current({
           singerName: endedSinger,
@@ -2714,8 +2772,15 @@ export const KaraokeProvider: React.FC<{ children: React.ReactNode; initialIsTvM
           isManual: false,
           nextSongTitle: nextQueueItem?.song.title,
           broadcast: false,
-          onSpeechEnd: () => {
-            setTimeout(proceedToNextSong, 500);
+          onSpeechEnd: (usedRealSpeech?: boolean) => {
+            if (usedRealSpeech) {
+              // Tunggu jeda aman 2.5 detik setelah suara MC selesai membacakan pantun
+              if (mcAudioEndWaitTimerRef.current) {
+                clearTimeout(mcAudioEndWaitTimerRef.current);
+              }
+              mcAudioEndWaitTimerRef.current = setTimeout(proceedToNextSong, 2500);
+            }
+            // Jika TTS diblokir/fallback non-suara, endTransitionTimerRef (22s) menjaga papan tetap terbaca
           },
         });
       } else {
@@ -3200,6 +3265,7 @@ export const KaraokeProvider: React.FC<{ children: React.ReactNode; initialIsTvM
                   if (data.payload?.komentar) announcement.komentar = data.payload.komentar;
                   announcement.namaVokalis = singer;
                   announcement.judulLagu = song;
+                  setIsSmartMcVisible(true);
                   triggerSmartMcRef.current({
                     singerName: singer,
                     songTitle: song,

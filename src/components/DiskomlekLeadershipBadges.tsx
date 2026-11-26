@@ -235,13 +235,12 @@ export const DiskomlekLeadershipBadge: React.FC<LeadershipBadgeProps> = ({ role,
             position: 'fixed',
             inset: 0,
             zIndex: 1000002,
-            backgroundColor: 'rgba(0, 0, 0, 0.88)',
+            backgroundColor: 'rgba(0, 0, 0, 0.92)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
             padding: '16px',
             cursor: 'pointer',
-            backdropFilter: 'blur(8px)',
           }}
         >
           <div

@@ -1,497 +1,253 @@
-import React from 'react';
-import { Mic, Volume2, RefreshCw, X, Radio } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
 import { useKaraoke } from '../context/KaraokeContext';
+import { MC_WANITA_TNI_AU_DATA_URL } from '../assets/mcCharacterAsset';
 
 /**
- * Komponen Popup Kartu SMART MC DISKOMLEKAU
- * Dioptimalkan untuk kompatibilitas penuh dan keterbacaan tinggi di browser Smart TV Android 13
- * dan Samsung Tizen OS (Solid Background rgba(10, 15, 28, 0.96), Border tegas 2px solid #eab308, z-index 99999).
+ * Fallback SVG Avatar MC Wanita TNI AU jika asset gambar utama gagal dimuat
+ */
+const McWanitaSvgFallback: React.FC = () => (
+  <svg
+    viewBox="0 0 180 220"
+    style={{ width: '100%', height: 'auto', display: 'block' }}
+    aria-label="MC Wanita TNI AU"
+  >
+    <defs>
+      <linearGradient id="mcLorengGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stopColor="#3f6212" />
+        <stop offset="50%" stopColor="#14532d" />
+        <stop offset="100%" stopColor="#365314" />
+      </linearGradient>
+      <linearGradient id="mcSkinGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+        <stop offset="0%" stopColor="#fde68a" />
+        <stop offset="100%" stopColor="#f5cba7" />
+      </linearGradient>
+    </defs>
+    <ellipse cx="90" cy="120" rx="75" ry="90" fill="rgba(220, 38, 38, 0.18)" />
+    <path d="M52,65 C52,32 128,32 128,65 L126,95 L54,95 Z" fill="#1e1b18" />
+    <ellipse cx="90" cy="68" rx="26" ry="30" fill="url(#mcSkinGrad)" />
+    <path d="M62,56 C70,40 112,38 122,56 C108,47 78,48 62,56 Z" fill="#171412" />
+    <circle cx="80" cy="67" r="2.8" fill="#1c1917" />
+    <circle cx="100" cy="67" r="2.8" fill="#1c1917" />
+    <path d="M82,81 Q90,87 98,81" stroke="#b91c1c" strokeWidth="2.4" fill="none" strokeLinecap="round" />
+    <rect x="81" y="95" width="18" height="16" rx="5" fill="#f5cba7" />
+    <path d="M38,218 L48,122 C52,110 70,106 90,106 C110,106 128,110 132,122 L142,218 Z" fill="url(#mcLorengGrad)" stroke="#84cc16" strokeWidth="1.5" />
+    <rect x="102" y="132" width="24" height="10" rx="2" fill="#1c1917" stroke="#facc15" strokeWidth="0.8" />
+    <text x="114" y="139.5" textAnchor="middle" fill="#fde047" fontSize="6.5" fontWeight="bold" fontFamily="monospace">
+      TNI AU
+    </text>
+    <rect x="47" y="136" width="12" height="5" fill="#dc2626" />
+    <rect x="47" y="141" width="12" height="5" fill="#ffffff" />
+  </svg>
+);
+
+/**
+ * Komponen Papan Pantun & Karakter MC Wanita TNI AU DISKOMLEKAU
+ * Panel hanya menampilkan teks Sampiran dan Isi Komando dengan ukuran font sangat besar dan jelas,
+ * tanpa tombol, label tambahan, komentar MC, atau elemen dekoratif di dalam panel.
  */
 export const SmartMcBanner: React.FC = () => {
   const {
     activeMcAnnouncement,
     isSmartMcVisible,
     isMcSpeaking,
-    triggerSmartMc,
-    replaySmartMcSpeech,
-    dismissSmartMc,
+    isTvMode,
   } = useKaraoke();
+
+  const [imgStage, setImgStage] = useState<'dataurl' | 'public' | 'svg'>('dataurl');
+  const [viewportWidth, setViewportWidth] = useState<number>(() =>
+    typeof window !== 'undefined' ? window.innerWidth : 1280
+  );
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handleResize = () => setViewportWidth(window.innerWidth);
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   if (!isSmartMcVisible || !activeMcAnnouncement) return null;
 
-  const {
-    badge,
-    pantunLines,
-    commentary,
-    komentar,
-    singerName,
-    namaVokalis,
-    songTitle,
-    judulLagu,
-    score,
-    tier,
-    nextSongTitle,
-  } = activeMcAnnouncement;
-
-  const displaySinger = namaVokalis || singerName || 'Prajurit Diskomlekau';
-  const displaySong = judulLagu || songTitle || 'Lagu Pilihan';
-  const displayCommentary = komentar || commentary || '';
+  const { pantunLines } = activeMcAnnouncement;
 
   const sampiran1 = (activeMcAnnouncement.sampiran && activeMcAnnouncement.sampiran[0]) || pantunLines[0] || '';
   const sampiran2 = (activeMcAnnouncement.sampiran && activeMcAnnouncement.sampiran[1]) || pantunLines[1] || '';
   const isi1 = (activeMcAnnouncement.isi && activeMcAnnouncement.isi[0]) || pantunLines[2] || '';
   const isi2 = (activeMcAnnouncement.isi && activeMcAnnouncement.isi[1]) || pantunLines[3] || '';
 
+  const isSmallMobile = viewportWidth < 560;
+  const isCompactLayout = viewportWidth < 900;
+  const mcWidthPx = isSmallMobile ? 74 : isCompactLayout ? 130 : isTvMode ? 200 : 172;
+
   return (
     <aside
       role="dialog"
       aria-modal="true"
-      aria-label="Smart MC Diskomlekau Pantun Card"
+      aria-label="Papan Pantun Smart MC Diskomlekau"
       id="smart-mc-tv-card"
-      style={{
-        position: 'fixed',
-        bottom: '24px',
-        left: '50%',
-        transform: 'translateX(-50%)',
-        width: '85%',
-        maxWidth: '860px',
-        zIndex: 99999,
-        overflow: 'hidden',
-        wordWrap: 'break-word',
-        overflowWrap: 'break-word',
-        backgroundColor: 'rgba(10, 15, 28, 0.96)',
-        border: '2px solid #eab308',
-        borderRadius: '16px',
-        boxShadow: '0 12px 36px rgba(0, 0, 0, 0.9), 0 0 0 1px rgba(234, 179, 8, 0.35)',
-        padding: '14px 18px',
-        color: '#ffffff',
-        boxSizing: 'border-box',
-        pointerEvents: 'auto',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '10px',
-      }}
-    >
-      {/* Baris Atas: Identitas MC, Vokalis, Lagu & Tombol Kontrol */}
-      <div
-        style={{
-          display: 'flex',
-          flexWrap: 'wrap',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: '8px',
-          paddingBottom: '8px',
-          borderBottom: '1px solid rgba(234, 179, 8, 0.35)',
-        }}
-      >
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '10px',
-            minWidth: 0,
-            flex: '1 1 auto',
-          }}
-        >
-          {/* Icon Mic dengan Indikator Suara Aktif */}
-          <div
-            style={{
-              position: 'relative',
+      style={
+        isTvMode
+          ? {
+              position: 'fixed',
+              bottom: '50px',
+              left: '16px',
+              right: '276px',
+              zIndex: 99999,
               display: 'flex',
-              height: '36px',
-              width: '36px',
-              alignItems: 'center',
-              justifyContent: 'center',
-              borderRadius: '10px',
-              backgroundColor: '#eab308',
-              color: '#020617',
-              fontWeight: 900,
-              flexShrink: 0,
-              boxShadow: '0 2px 8px rgba(234, 179, 8, 0.4)',
-            }}
-          >
-            <Mic style={{ width: '20px', height: '20px' }} />
-            {isMcSpeaking && (
-              <span
-                style={{
-                  position: 'absolute',
-                  top: '-3px',
-                  right: '-3px',
-                  width: '11px',
-                  height: '11px',
-                  borderRadius: '50%',
-                  backgroundColor: '#10b981',
-                  border: '2px solid #ffffff',
-                }}
-              />
-            )}
-          </div>
-
-          <div style={{ minWidth: 0, flex: '1 1 auto' }}>
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px',
-                flexWrap: 'wrap',
-              }}
-            >
-              <span
-                style={{
-                  fontSize: '13px',
-                  fontWeight: 900,
-                  letterSpacing: '0.06em',
-                  textTransform: 'uppercase',
-                  color: '#facc15',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '5px',
-                }}
-              >
-                <Radio
-                  style={{
-                    width: '15px',
-                    height: '15px',
-                    color: isMcSpeaking ? '#34d399' : '#38bdf8',
-                  }}
-                />
-                <span>SMART MC DISKOMLEKAU</span>
-              </span>
-              <span
-                style={{
-                  fontSize: '10px',
-                  fontFamily: 'monospace',
-                  fontWeight: 900,
-                  padding: '2px 8px',
-                  borderRadius: '6px',
-                  backgroundColor: 'rgba(234, 179, 8, 0.2)',
-                  color: '#fef08a',
-                  border: '1px solid #eab308',
-                }}
-              >
-                {badge}
-              </span>
-              <span
-                style={{
-                  fontSize: '10px',
-                  fontFamily: 'monospace',
-                  color: '#94a3b8',
-                  marginLeft: 'auto',
-                }}
-              >
-                Auto-tutup 10s • Remote [OK / Back]
-              </span>
-            </div>
-
-            {/* Nama Vokalis & Judul Lagu */}
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-                fontSize: '12px',
-                color: '#bae6fd',
-                fontFamily: 'monospace',
-                marginTop: '3px',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-              }}
-            >
-              <span>
-                Vokalis: <strong style={{ color: '#fde047' }}>{displaySinger}</strong>
-              </span>
-              <span>|</span>
-              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                Lagu: <strong style={{ color: '#ffffff' }}>{displaySong}</strong>
-              </span>
-              {typeof score === 'number' && (
-                <>
-                  <span>|</span>
-                  <span>
-                    Skor: <strong style={{ color: '#6ee7b7' }}>{score}/100</strong>
-                  </span>
-                </>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* Tombol Aksi Smart MC */}
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '6px',
-            flexShrink: 0,
-          }}
-        >
-          {nextSongTitle && (
-            <button
-              type="button"
-              onClick={() => dismissSmartMc()}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '4px',
-                padding: '5px 10px',
-                borderRadius: '8px',
-                backgroundColor: '#059669',
-                color: '#ffffff',
-                fontSize: '11px',
-                fontWeight: 900,
-                border: '1px solid #34d399',
-                cursor: 'pointer',
-              }}
-              title={`Putar lagu berikutnya: ${nextSongTitle}`}
-            >
-              <span>Lanjut Lagu</span>
-            </button>
-          )}
-
-          <button
-            type="button"
-            disabled={isMcSpeaking}
-            onClick={() => replaySmartMcSpeech()}
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '4px',
-              padding: '5px 10px',
-              borderRadius: '8px',
-              backgroundColor: isMcSpeaking ? '#0369a1' : '#0284c7',
-              color: '#ffffff',
-              fontSize: '11px',
-              fontWeight: 800,
-              border: '1px solid #38bdf8',
-              cursor: isMcSpeaking ? 'not-allowed' : 'pointer',
-              opacity: isMcSpeaking ? 0.55 : 1,
-            }}
-            title={isMcSpeaking ? 'Tunggu pantun MC selesai dibacakan' : 'Bacakan ulang pantun'}
-          >
-            <Volume2 style={{ width: '13px', height: '13px' }} />
-            <span>{isMcSpeaking ? 'Berbicara...' : 'Suara'}</span>
-          </button>
-
-          <button
-            type="button"
-            disabled={isMcSpeaking}
-            onClick={() =>
-              triggerSmartMc({
-                singerName: displaySinger,
-                songTitle: displaySong,
-                score,
-                forceTier: tier,
-                isManual: true,
-                nextSongTitle,
-                broadcast: true,
-              })
+              flexDirection: 'row',
+              alignItems: 'flex-end',
+              justifyContent: 'flex-start',
+              pointerEvents: 'none',
+              boxSizing: 'border-box',
             }
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '4px',
-              padding: '5px 10px',
-              borderRadius: '8px',
-              backgroundColor: isMcSpeaking ? '#b45309' : '#eab308',
-              color: '#020617',
-              fontSize: '11px',
-              fontWeight: 900,
-              border: '1px solid #fde047',
-              cursor: isMcSpeaking ? 'not-allowed' : 'pointer',
-              opacity: isMcSpeaking ? 0.55 : 1,
-            }}
-            title={isMcSpeaking ? 'Tunggu pantun pertama selesai dulu' : 'Ganti pantun MC berikutnya'}
-          >
-            <RefreshCw style={{ width: '13px', height: '13px' }} />
-            <span>Pantun Lain</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => dismissSmartMc()}
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '4px',
-              padding: '5px 10px',
-              borderRadius: '8px',
-              backgroundColor: '#1e293b',
-              color: '#f8fafc',
-              fontSize: '11px',
-              fontWeight: 800,
-              border: '1px solid #64748b',
-              cursor: 'pointer',
-            }}
-            title="Tutup Smart MC (Tombol OK / Back pada Remote TV)"
-          >
-            <X style={{ width: '13px', height: '13px' }} />
-            <span>Tutup (OK)</span>
-          </button>
-        </div>
-      </div>
-
-      {/* Bagian Pantun 4 Baris: SAMPIRAN PANTUN & ISI KOMANDO */}
+          : {
+              position: 'fixed',
+              bottom: isSmallMobile ? '12px' : '18px',
+              left: '50%',
+              transform: 'translateX(-50%)',
+              width: 'calc(100vw - 24px)',
+              maxWidth: '960px',
+              zIndex: 99999,
+              display: 'flex',
+              flexDirection: 'row',
+              alignItems: 'flex-end',
+              justifyContent: 'center',
+              pointerEvents: 'none',
+              boxSizing: 'border-box',
+            }
+      }
+    >
+      {/* PANEL PANTUN: Hanya memuat teks Sampiran dan Isi Komando dengan font sangat besar & jelas */}
       <div
         style={{
-          display: 'flex',
-          flexDirection: 'row',
-          flexWrap: 'wrap',
-          gap: '12px',
-          backgroundColor: '#040916',
-          borderRadius: '12px',
-          padding: '12px 14px',
-          border: '1px solid rgba(234, 179, 8, 0.4)',
+          flex: '1 1 auto',
+          minWidth: 0,
+          pointerEvents: 'auto',
+          backgroundColor: 'rgba(84, 9, 14, 0.96)',
+          background:
+            'linear-gradient(135deg, rgba(118, 15, 22, 0.97) 0%, rgba(74, 8, 13, 0.97) 58%, rgba(48, 4, 8, 0.98) 100%)',
+          border: '2px solid #ef4444',
+          borderRadius: '14px',
+          boxShadow: '0 12px 34px rgba(0, 0, 0, 0.9)',
+          padding: isSmallMobile ? '14px 16px' : isCompactLayout ? '18px 22px' : '20px 36px 20px 28px',
+          color: '#ffffff',
           boxSizing: 'border-box',
+          display: 'flex',
+          flexDirection: 'column',
+          justifyContent: 'center',
+          textAlign: 'center',
+          gap: isSmallMobile ? '10px' : '12px',
+          wordWrap: 'break-word',
+          overflowWrap: 'break-word',
         }}
       >
-        {/* SAMPIRAN PANTUN (2 Baris Pertama) */}
-        <div
-          style={{
-            flex: '1 1 280px',
-            minWidth: 0,
-            textAlign: 'left',
-            boxSizing: 'border-box',
-          }}
-        >
-          <div
-            style={{
-              fontSize: '11px',
-              fontFamily: 'monospace',
-              fontWeight: 900,
-              textTransform: 'uppercase',
-              letterSpacing: '0.08em',
-              color: '#38bdf8',
-              marginBottom: '4px',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '4px',
-            }}
-          >
-            <span>📜</span>
-            <span>SAMPIRAN PANTUN:</span>
-          </div>
+        {/* Sampiran Pantun */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
           <p
             style={{
-              margin: '0 0 3px 0',
-              fontSize: '14px',
+              margin: 0,
+              fontSize: isSmallMobile
+                ? 'clamp(17px, 4.6vw, 22px)'
+                : isCompactLayout
+                ? 'clamp(21px, 2.8vw, 27px)'
+                : 'clamp(24px, 2.3vw, 32px)',
               fontWeight: 700,
-              color: '#e2e8f0',
-              fontStyle: 'italic',
-              lineHeight: 1.4,
-              wordWrap: 'break-word',
+              color: '#ffffff',
+              lineHeight: 1.3,
+              textShadow: '0 2px 6px rgba(0, 0, 0, 0.9)',
             }}
           >
-            &ldquo;{sampiran1}&rdquo;
+            {sampiran1}
           </p>
           <p
             style={{
               margin: 0,
-              fontSize: '14px',
+              fontSize: isSmallMobile
+                ? 'clamp(17px, 4.6vw, 22px)'
+                : isCompactLayout
+                ? 'clamp(21px, 2.8vw, 27px)'
+                : 'clamp(24px, 2.3vw, 32px)',
               fontWeight: 700,
-              color: '#e2e8f0',
-              fontStyle: 'italic',
-              lineHeight: 1.4,
-              wordWrap: 'break-word',
+              color: '#ffffff',
+              lineHeight: 1.3,
+              textShadow: '0 2px 6px rgba(0, 0, 0, 0.9)',
             }}
           >
-            &ldquo;{sampiran2}&rdquo;
+            {sampiran2}
           </p>
         </div>
 
-        {/* ISI KOMANDO (2 Baris Penutup Pantun) */}
-        <div
-          style={{
-            flex: '1 1 280px',
-            minWidth: 0,
-            textAlign: 'left',
-            boxSizing: 'border-box',
-          }}
-        >
-          <div
-            style={{
-              fontSize: '11px',
-              fontFamily: 'monospace',
-              fontWeight: 900,
-              textTransform: 'uppercase',
-              letterSpacing: '0.08em',
-              color: '#eab308',
-              marginBottom: '4px',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '4px',
-            }}
-          >
-            <span>⚡</span>
-            <span>ISI KOMANDO:</span>
-          </div>
-          <p
-            style={{
-              margin: '0 0 3px 0',
-              fontSize: '15px',
-              fontWeight: 900,
-              color: '#facc15',
-              lineHeight: 1.4,
-              wordWrap: 'break-word',
-            }}
-          >
-            &ldquo;{isi1}&rdquo;
-          </p>
+        {/* Isi Komando */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
           <p
             style={{
               margin: 0,
-              fontSize: '15px',
+              fontSize: isSmallMobile
+                ? 'clamp(19px, 5vw, 24px)'
+                : isCompactLayout
+                ? 'clamp(23px, 3vw, 30px)'
+                : 'clamp(26px, 2.5vw, 35px)',
               fontWeight: 900,
               color: '#fef08a',
-              lineHeight: 1.4,
-              wordWrap: 'break-word',
+              lineHeight: 1.28,
+              textShadow: '0 2px 8px rgba(0, 0, 0, 0.95)',
             }}
           >
-            &ldquo;{isi2}&rdquo;
+            {isi1}
+          </p>
+          <p
+            style={{
+              margin: 0,
+              fontSize: isSmallMobile
+                ? 'clamp(19px, 5vw, 24px)'
+                : isCompactLayout
+                ? 'clamp(23px, 3vw, 30px)'
+                : 'clamp(26px, 2.5vw, 35px)',
+              fontWeight: 900,
+              color: '#ffffff',
+              lineHeight: 1.28,
+              textShadow: '0 2px 8px rgba(0, 0, 0, 0.95)',
+            }}
+          >
+            {isi2}
           </p>
         </div>
       </div>
 
-      {/* Bagian KOMENTAR MC DISKOMLEKAU */}
-      {Boolean(displayCommentary && displayCommentary.trim()) && (
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'flex-start',
-            gap: '8px',
-            textAlign: 'left',
-            backgroundColor: '#07162c',
-            borderRadius: '10px',
-            padding: '8px 12px',
-            border: '1px solid rgba(56, 189, 248, 0.4)',
-            boxSizing: 'border-box',
-          }}
-        >
-          <span
-            style={{
-              fontSize: '11px',
-              fontWeight: 900,
-              color: '#34d399',
-              flexShrink: 0,
-              fontFamily: 'monospace',
+      {/* KARAKTER MC WANITA TNI AU DI SISI KANAN PAPAN PANTUN */}
+      <div
+        className={isMcSpeaking ? 'mc-character-speaking' : 'mc-character-float'}
+        style={{
+          width: `${mcWidthPx}px`,
+          flexShrink: 0,
+          marginLeft: isSmallMobile ? '4px' : '-20px',
+          marginBottom: '-2px',
+          position: 'relative',
+          zIndex: 2,
+          display: 'flex',
+          alignItems: 'flex-end',
+          justifyContent: 'center',
+          pointerEvents: 'none',
+        }}
+      >
+        {imgStage !== 'svg' ? (
+          <img
+            src={imgStage === 'dataurl' ? MC_WANITA_TNI_AU_DATA_URL : '/images/mc-wanita-tniau.png'}
+            alt="MC Wanita TNI AU"
+            onError={() => {
+              setImgStage((prev) => (prev === 'dataurl' ? 'public' : 'svg'));
             }}
-          >
-            [KOMENTAR MC]:
-          </span>
-          <p
             style={{
-              margin: 0,
-              fontSize: '12px',
-              fontWeight: 700,
-              color: '#e0f2fe',
-              lineHeight: 1.45,
-              wordWrap: 'break-word',
+              width: '100%',
+              height: 'auto',
+              display: 'block',
+              filter: 'drop-shadow(0 6px 16px rgba(0, 0, 0, 0.85))',
+              userSelect: 'none',
             }}
-          >
-            {displayCommentary}
-          </p>
-        </div>
-      )}
+          />
+        ) : (
+          <McWanitaSvgFallback />
+        )}
+      </div>
     </aside>
   );
 };
