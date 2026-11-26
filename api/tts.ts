@@ -49,32 +49,38 @@ export default async function handler(req: any, res: any) {
 
   const rawText = String(req.query?.text || req.query?.q || 'Selamat bernyanyi di Karaoke Diskomlekau!').trim();
   const tier = String(req.query?.tier || 'manual').trim();
-  const chunks = splitTtsChunks(rawText, 180);
+  const chunks = splitTtsChunks(rawText, 200);
 
   try {
-    const audioBuffers: Buffer[] = [];
-    for (const chunk of chunks) {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 5000);
-      try {
-        const ttsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&tl=id&client=tw-ob&q=${encodeURIComponent(chunk)}`;
-        const upstream = await fetch(ttsUrl, {
-          signal: controller.signal,
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-            Referer: 'https://translate.google.com/',
-          },
-        });
-        if (upstream.ok) {
-          const arrBuf = await upstream.arrayBuffer();
-          if (arrBuf.byteLength > 256) {
-            audioBuffers.push(Buffer.from(arrBuf));
+    const chunkResults = await Promise.all(
+      chunks.map(async (chunk) => {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 3500);
+        try {
+          const ttsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&tl=id&client=tw-ob&ttsspeed=1&q=${encodeURIComponent(chunk)}`;
+          const upstream = await fetch(ttsUrl, {
+            signal: controller.signal,
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+              Referer: 'https://translate.google.com/',
+            },
+          });
+          if (upstream.ok) {
+            const arrBuf = await upstream.arrayBuffer();
+            if (arrBuf.byteLength > 256) {
+              return Buffer.from(arrBuf);
+            }
           }
+        } catch {
+          // Abaikan chunk gagal
+        } finally {
+          clearTimeout(timer);
         }
-      } finally {
-        clearTimeout(timer);
-      }
-    }
+        return null;
+      })
+    );
+
+    const audioBuffers = chunkResults.filter((buf): buf is NonNullable<typeof buf> => buf !== null);
 
     if (audioBuffers.length > 0) {
       const combined = Buffer.concat(audioBuffers);

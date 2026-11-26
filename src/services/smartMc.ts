@@ -560,8 +560,8 @@ export function generateSmartMcAnnouncement(options: GenerateSmartMcOptions = {}
   const sampiran: [string, string] = [pantunLines[0], pantunLines[1]];
   const isi: [string, string] = [pantunLines[2], pantunLines[3]];
 
-  // Narasi audio MC ringkas: HANYA vokalis yang memilih lagu, judul lagu, dan pantun
-  const fullSpeechText = `Vokalis ${cleanSinger}, lagu ${cleanSong}. ${pantunLines.join(', ')}.`;
+  // Narasi audio MC tegas & ringkas: HANYA vokalis yang memilih lagu, judul lagu, dan pantun
+  const fullSpeechText = `Vokalis ${cleanSinger}! Lagu ${cleanSong}! ${pantunLines[0]}, ${pantunLines[1]}! ${pantunLines[2]}, ${pantunLines[3]}!`;
 
   return {
     id: `mc-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
@@ -646,9 +646,14 @@ function isTizenBrowser(): boolean {
   return /tizen|smart-tv|smarttv|samsung/i.test(navigator.userAgent || '');
 }
 
+const MC_AUDIO_PLAYBACK_RATE = 1.28;
+const MC_SPEECH_RATE = 1.3;
+const MC_SPEECH_PITCH = 1.0;
+
 function tryBrowserSpeechFallback(
   text: string,
   sessionId: number,
+  onStarted: () => void,
   onDone: () => void,
   onFailed: () => void
 ): boolean {
@@ -665,8 +670,8 @@ function tryBrowserSpeechFallback(
     window.speechSynthesis.cancel();
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = 'id-ID';
-    utterance.rate = 0.98;
-    utterance.pitch = 1.12;
+    utterance.rate = MC_SPEECH_RATE;
+    utterance.pitch = MC_SPEECH_PITCH;
     utterance.volume = 1.0;
 
     const voices = window.speechSynthesis.getVoices();
@@ -678,12 +683,19 @@ function tryBrowserSpeechFallback(
     }
 
     let settled = false;
+    let started = false;
+    const markStarted = () => {
+      if (started || settled || sessionId !== activePlaybackSessionId) return;
+      started = true;
+      onStarted();
+    };
     const finishSpeech = () => {
       if (settled || sessionId !== activePlaybackSessionId) return;
       settled = true;
       onDone();
     };
 
+    utterance.onstart = markStarted;
     utterance.onend = finishSpeech;
     utterance.onerror = () => {
       if (settled || sessionId !== activePlaybackSessionId) return;
@@ -692,7 +704,13 @@ function tryBrowserSpeechFallback(
     };
     window.speechSynthesis.speak(utterance);
 
-    // Fallback check in case speechSynthesis silently drops on Android WebView
+    // Fallback check in case speechSynthesis silently drops or onstart doesn't fire on Android WebView
+    setTimeout(() => {
+      if (!settled && sessionId === activePlaybackSessionId && window.speechSynthesis.speaking) {
+        markStarted();
+      }
+    }, 350);
+
     setTimeout(() => {
       if (
         !settled &&
@@ -723,6 +741,9 @@ export function stopSmartMcSpeech(): void {
   }
   if (activeMcAudioRef) {
     try {
+      activeMcAudioRef.onplaying = null;
+      activeMcAudioRef.ontimeupdate = null;
+      activeMcAudioRef.onloadedmetadata = null;
       activeMcAudioRef.onended = null;
       activeMcAudioRef.onerror = null;
       activeMcAudioRef.pause();
@@ -742,8 +763,9 @@ export function stopSmartMcSpeech(): void {
 }
 
 /**
- * Memutar suara MC Wanita yang merdu & ramah menggunakan HTML5 <audio> (`/api/tts` terlebih dahulu)
+ * Memutar suara MC Wanita yang merdu, cepat, & tegas menggunakan HTML5 <audio> (`/api/tts` terlebih dahulu)
  * lalu fallback ke Web Speech API (non-Tizen) dan file MP3 lokal di `/public/sounds/`.
+ * Memastikan `onStart` hanya terpanggil tepat saat audio benar-benar mulai berbunyi sehingga tulisan dan suara muncul bersamaan.
  */
 export function playSmartMcAudio(
   tierOrText: SmartMcTier | string = 'manual',
@@ -771,9 +793,17 @@ export function playSmartMcAudio(
   const resolvedText =
     (speechText && speechText.trim()) ||
     (!isTier && tierOrText.trim()) ||
-    'Vokalis Prajurit Diskomlekau, mari bernyanyi bersama.';
+    'Vokalis Prajurit Diskomlekau! Mari bernyanyi bersama!';
 
+  let hasStarted = false;
   let hasCompleted = false;
+
+  const notifyAudioStarted = () => {
+    if (hasStarted || hasCompleted || sessionId !== activePlaybackSessionId) return;
+    hasStarted = true;
+    onStart?.();
+  };
+
   const finishOnce = () => {
     if (hasCompleted || sessionId !== activePlaybackSessionId) return;
     hasCompleted = true;
@@ -784,6 +814,9 @@ export function playSmartMcAudio(
     }
     if (activeMcAudioRef) {
       try {
+        activeMcAudioRef.onplaying = null;
+        activeMcAudioRef.ontimeupdate = null;
+        activeMcAudioRef.onloadedmetadata = null;
         activeMcAudioRef.onended = null;
         activeMcAudioRef.onerror = null;
       } catch {}
@@ -793,6 +826,7 @@ export function playSmartMcAudio(
   };
 
   if (typeof window === 'undefined') {
+    notifyAudioStarted();
     finishOnce();
     return;
   }
@@ -802,15 +836,16 @@ export function playSmartMcAudio(
     unlockedAudioPoolEl.preload = 'auto';
   }
 
-  onStart?.();
-
   // Prioritaskan langsung endpoint /api/tts suara Indonesia agar tidak buang user-gesture pada file 404
   const ttsEndpoint = `/api/tts?text=${encodeURIComponent(resolvedText.slice(0, 260))}&tier=${encodeURIComponent(resolvedTier)}`;
   const offlineFallbacks = SMART_MC_OFFLINE_FALLBACK_FILES[resolvedTier] || SMART_MC_OFFLINE_FALLBACK_FILES.manual;
   const candidateFiles = [ttsEndpoint, ...offlineFallbacks];
 
   // Safety timer agar status speaking & ducking selalu pulih tepat waktu
-  fallbackSpeechTimerRef = setTimeout(finishOnce, 12000);
+  fallbackSpeechTimerRef = setTimeout(() => {
+    notifyAudioStarted();
+    finishOnce();
+  }, 12000);
 
   let speechAttempted = false;
 
@@ -823,6 +858,7 @@ export function playSmartMcAudio(
       const startedSpeech = tryBrowserSpeechFallback(
         resolvedText,
         sessionId,
+        notifyAudioStarted,
         finishOnce,
         () => tryPlayCandidate(1)
       );
@@ -832,6 +868,7 @@ export function playSmartMcAudio(
     }
 
     if (index >= candidateFiles.length) {
+      notifyAudioStarted();
       try {
         audioFx.playSmartMc(resolvedTier);
       } catch {}
@@ -841,20 +878,45 @@ export function playSmartMcAudio(
 
     const src = candidateFiles[index];
     let attemptSettled = false;
+    let loadStallTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const clearStallTimer = () => {
+      if (loadStallTimer) {
+        clearTimeout(loadStallTimer);
+        loadStallTimer = null;
+      }
+    };
 
     try {
       const audio = index === 0 && unlockedAudioPoolEl ? unlockedAudioPoolEl : new Audio();
+      audio.onplaying = null;
+      audio.ontimeupdate = null;
+      audio.onloadedmetadata = null;
       audio.onended = null;
       audio.onerror = null;
       audio.src = src;
       audio.preload = 'auto';
       audio.volume = 1.0;
+
+      const applySpeedAndTone = () => {
+        try {
+          (audio as any).defaultPlaybackRate = MC_AUDIO_PLAYBACK_RATE;
+          audio.playbackRate = MC_AUDIO_PLAYBACK_RATE;
+          (audio as any).preservesPitch = true;
+          (audio as any).webkitPreservesPitch = true;
+        } catch {}
+      };
+      applySpeedAndTone();
       activeMcAudioRef = audio;
 
       const advanceToNext = () => {
+        clearStallTimer();
         if (attemptSettled || hasCompleted || sessionId !== activePlaybackSessionId) return;
         attemptSettled = true;
         try {
+          audio.onplaying = null;
+          audio.ontimeupdate = null;
+          audio.onloadedmetadata = null;
           audio.onended = null;
           audio.onerror = null;
           audio.pause();
@@ -865,9 +927,40 @@ export function playSmartMcAudio(
         tryPlayCandidate(index + 1);
       };
 
+      // Jika TTS network butuh terlalu lama (> 2.6s) tanpa mulai berbunyi, segera fallback agar tidak telat
+      if (index === 0) {
+        loadStallTimer = setTimeout(() => {
+          if (!hasStarted && !attemptSettled && sessionId === activePlaybackSessionId) {
+            advanceToNext();
+          }
+        }, 2600);
+      }
+
+      audio.onloadedmetadata = () => {
+        applySpeedAndTone();
+      };
+
+      audio.onplaying = () => {
+        clearStallTimer();
+        applySpeedAndTone();
+        if (!attemptSettled && !hasCompleted && sessionId === activePlaybackSessionId) {
+          notifyAudioStarted();
+        }
+      };
+
+      audio.ontimeupdate = () => {
+        if (audio.currentTime > 0 && !hasStarted && !attemptSettled && sessionId === activePlaybackSessionId) {
+          clearStallTimer();
+          applySpeedAndTone();
+          notifyAudioStarted();
+        }
+      };
+
       audio.onended = () => {
+        clearStallTimer();
         if (attemptSettled || hasCompleted || sessionId !== activePlaybackSessionId) return;
         attemptSettled = true;
+        notifyAudioStarted();
         finishOnce();
       };
 
@@ -878,6 +971,7 @@ export function playSmartMcAudio(
         playPromise.catch(advanceToNext);
       }
     } catch {
+      clearStallTimer();
       if (!attemptSettled) {
         attemptSettled = true;
         tryPlayCandidate(index + 1);

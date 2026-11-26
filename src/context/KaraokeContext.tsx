@@ -272,6 +272,7 @@ export const KaraokeProvider: React.FC<{ children: React.ReactNode; initialIsTvM
   const processedMcIdsRef = useRef<Set<string>>(new Set());
   const mcDismissTimerRef = useRef<any>(null);
   const mcAudioEndWaitTimerRef = useRef<any>(null);
+  const mcRevealFallbackTimerRef = useRef<any>(null);
   const endTransitionTimerRef = useRef<any>(null);
   const isAwaitingEndTransitionQueueSkipRef = useRef<boolean>(false);
   const lastMcTriggerTimeRef = useRef<number>(0);
@@ -365,15 +366,15 @@ export const KaraokeProvider: React.FC<{ children: React.ReactNode; initialIsTvM
     }
   }, []);
 
-  // Audio Ducking: kecilkan sementara musik karaoke saat Smart MC berbicara, lalu kembalikan ke volume asal
+  // Audio Ducking: kecilkan musik karaoke secara jelas saat Smart MC berbicara, lalu kembalikan ke volume asal
   const startAudioDucking = useCallback(() => {
     if (!isDuckingRef.current) {
       preDuckVolumeRef.current = audioVolumeRef.current;
       isDuckingRef.current = true;
     }
-    const duckedVol = Math.max(15, Math.round(preDuckVolumeRef.current * 0.25));
+    const duckedVol = Math.max(10, Math.round(preDuckVolumeRef.current * 0.18));
     applyHardwarePlayerVolume(duckedVol, isMutedRef.current);
-    setMusicBoostMultiplier(0.35);
+    setMusicBoostMultiplier(0.25);
   }, [applyHardwarePlayerVolume, setMusicBoostMultiplier]);
 
   const stopAudioDucking = useCallback(() => {
@@ -1034,7 +1035,6 @@ export const KaraokeProvider: React.FC<{ children: React.ReactNode; initialIsTvM
                   announcement.namaVokalis = singer;
                   announcement.judulLagu = song;
 
-                  setIsSmartMcVisible(true);
                   triggerSmartMcRef.current({
                     singerName: singer,
                     songTitle: song,
@@ -1170,7 +1170,6 @@ export const KaraokeProvider: React.FC<{ children: React.ReactNode; initialIsTvM
                 if (data.payload?.komentar) announcement.komentar = data.payload.komentar;
                 announcement.namaVokalis = singer;
                 announcement.judulLagu = song;
-                setIsSmartMcVisible(true);
                 triggerSmartMcRef.current({
                   singerName: singer,
                   songTitle: song,
@@ -1360,7 +1359,6 @@ export const KaraokeProvider: React.FC<{ children: React.ReactNode; initialIsTvM
         if (serverRoom.isSmartMcVisible && serverRoom.activeMcAnnouncement?.id) {
           const mcAnn = serverRoom.activeMcAnnouncement;
           if (!processedMcIdsRef.current.has(mcAnn.id) && !isMcSpeakingRef.current && !isSmartMcPlaying()) {
-            setIsSmartMcVisible(true);
             triggerSmartMcRef.current({
               singerName: mcAnn.namaVokalis || mcAnn.singerName || currentSingerNameRef.current || defaultSingerName,
               songTitle: mcAnn.judulLagu || mcAnn.songTitle || currentSongRef.current?.title,
@@ -1500,7 +1498,6 @@ export const KaraokeProvider: React.FC<{ children: React.ReactNode; initialIsTvM
               if (msg.payload?.komentar) announcement.komentar = msg.payload.komentar;
               announcement.namaVokalis = singer;
               announcement.judulLagu = song;
-              setIsSmartMcVisible(true);
               triggerSmartMcRef.current({
                 singerName: singer,
                 songTitle: song,
@@ -2023,6 +2020,10 @@ export const KaraokeProvider: React.FC<{ children: React.ReactNode; initialIsTvM
       clearTimeout(mcAudioEndWaitTimerRef.current);
       mcAudioEndWaitTimerRef.current = null;
     }
+    if (mcRevealFallbackTimerRef.current) {
+      clearTimeout(mcRevealFallbackTimerRef.current);
+      mcRevealFallbackTimerRef.current = null;
+    }
     if (endTransitionTimerRef.current) {
       clearTimeout(endTransitionTimerRef.current);
       endTransitionTimerRef.current = null;
@@ -2502,33 +2503,59 @@ export const KaraokeProvider: React.FC<{ children: React.ReactNode; initialIsTvM
         clearTimeout(mcAudioEndWaitTimerRef.current);
         mcAudioEndWaitTimerRef.current = null;
       }
+      if (mcRevealFallbackTimerRef.current) {
+        clearTimeout(mcRevealFallbackTimerRef.current);
+        mcRevealFallbackTimerRef.current = null;
+      }
 
-      // Kunci langsung secara sinkron sebelum audio diputar agar tidak ada panggilan kedua yang menembus
+      // Kunci langsung secara sinkron sebelum audio dimuat agar tidak ada panggilan kedua yang menembus
       isMcSpeakingRef.current = true;
       setIsMcSpeaking(true);
-      setActiveMcAnnouncement(announcement);
-      setIsSmartMcVisible(true);
-      broadcastMcStatus(true);
 
-      // Batas aman auto-dismiss 10 detik sesuai spesifikasi Smart MC
-      mcDismissTimerRef.current = setTimeout(() => {
-        stopSmartMcSpeech();
-        stopAudioDucking();
-        isMcSpeakingRef.current = false;
-        setActiveMcAnnouncement(null);
-        setIsSmartMcVisible(false);
-        setIsMcSpeaking(false);
-        broadcastMcStatus(false);
-      }, 10000);
+      let popupRevealed = false;
+      const revealPopupAndAudioTogether = () => {
+        if (popupRevealed || !isMcSpeakingRef.current) return;
+        popupRevealed = true;
+        if (mcRevealFallbackTimerRef.current) {
+          clearTimeout(mcRevealFallbackTimerRef.current);
+          mcRevealFallbackTimerRef.current = null;
+        }
+        startAudioDucking();
+        setActiveMcAnnouncement(announcement);
+        setIsSmartMcVisible(true);
+        setIsMcSpeaking(true);
+        broadcastMcStatus(true);
+
+        if (mcDismissTimerRef.current) {
+          clearTimeout(mcDismissTimerRef.current);
+        }
+        // Auto-dismiss 10 detik dimulai tepat saat pantun dan suara muncul bersamaan
+        mcDismissTimerRef.current = setTimeout(() => {
+          stopSmartMcSpeech();
+          stopAudioDucking();
+          isMcSpeakingRef.current = false;
+          setActiveMcAnnouncement(null);
+          setIsSmartMcVisible(false);
+          setIsMcSpeaking(false);
+          broadcastMcStatus(false);
+        }, 10000);
+      };
+
+      // Safety fallback jika perangkat sama sekali tidak mengizinkan audio agar kartu tidak tertahan
+      mcRevealFallbackTimerRef.current = setTimeout(() => {
+        revealPopupAndAudioTogether();
+      }, 3000);
 
       speakSmartMcIndonesian(
         announcement.tier,
         () => {
-          startAudioDucking();
-          isMcSpeakingRef.current = true;
-          setIsMcSpeaking(true);
+          revealPopupAndAudioTogether();
         },
         () => {
+          if (mcRevealFallbackTimerRef.current) {
+            clearTimeout(mcRevealFallbackTimerRef.current);
+            mcRevealFallbackTimerRef.current = null;
+          }
           stopAudioDucking();
           isMcSpeakingRef.current = false;
           setIsMcSpeaking(false);
@@ -3173,7 +3200,6 @@ export const KaraokeProvider: React.FC<{ children: React.ReactNode; initialIsTvM
                   if (data.payload?.komentar) announcement.komentar = data.payload.komentar;
                   announcement.namaVokalis = singer;
                   announcement.judulLagu = song;
-                  setIsSmartMcVisible(true);
                   triggerSmartMcRef.current({
                     singerName: singer,
                     songTitle: song,
