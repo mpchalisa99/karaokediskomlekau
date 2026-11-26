@@ -25,7 +25,11 @@ export type PeerAction =
   | 'SUBMIT_JURY_SCORE'
   | 'SYNC_JURY_SCORES'
   | 'TRIGGER_SMART_MC'
-  | 'SHOW_PANTUN';
+  | 'SHOW_PANTUN'
+  | 'SMART_MC_STATUS'
+  | 'UPDATE_MIC_LEVEL'
+  | 'PING'
+  | 'PONG';
 
 export interface PeerMessage {
   action: PeerAction;

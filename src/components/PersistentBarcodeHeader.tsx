@@ -57,12 +57,12 @@ export const PersistentBarcodeHeader: React.FC = () => {
   const clientUrl = getUniversalBarcodeUrl(roomId, networkInfo, currentMode);
   const waShareUrl = getWhatsAppShareUrl(roomId, clientUrl);
 
-  // Generate crisp, pure black on white QR codes with level M (fast optical decode)
+  // Generate crisp, pure black on white QR codes with level M & ISO 4-module quiet zone
   useEffect(() => {
     // 1. Standard header size
     QRCode.toDataURL(clientUrl, {
-      width: 280,
-      margin: 2,
+      width: 480,
+      margin: 4,
       color: {
         dark: '#000000', // Pure black for 100% optical readability on LCD screens
         light: '#ffffff',
@@ -74,8 +74,8 @@ export const PersistentBarcodeHeader: React.FC = () => {
 
     // 2. High-res zoom modal size
     QRCode.toDataURL(clientUrl, {
-      width: 500,
-      margin: 3,
+      width: 640,
+      margin: 4,
       color: {
         dark: '#000000',
         light: '#ffffff',
@@ -143,11 +143,12 @@ export const PersistentBarcodeHeader: React.FC = () => {
                 <img
                   src={qrDataUrl}
                   alt={`Barcode Akses Room ${roomId}`}
-                  className="h-16 w-16 sm:h-18 sm:w-18 object-contain rounded-lg"
+                  style={{ imageRendering: 'pixelated' }}
+                  className="h-24 w-24 sm:h-24 sm:w-24 object-contain rounded-lg bg-white"
                 />
               ) : (
-                <div className="flex h-16 w-16 sm:h-18 sm:w-18 items-center justify-center bg-slate-100 text-sky-600">
-                  <QrCode className="h-8 w-8 animate-pulse" />
+                <div className="flex h-24 w-24 sm:h-24 sm:w-24 items-center justify-center bg-slate-100 text-sky-600">
+                  <QrCode className="h-10 w-10 animate-pulse" />
                 </div>
               )}
               {/* Zoom overlay badge */}
@@ -407,10 +408,11 @@ export const PersistentBarcodeHeader: React.FC = () => {
                 <img
                   src={largeQrDataUrl}
                   alt={`Barcode Room ${roomId}`}
-                  className="h-64 w-64 object-contain rounded-lg mx-auto"
+                  style={{ imageRendering: 'pixelated' }}
+                  className="h-72 w-72 object-contain rounded-lg mx-auto bg-white"
                 />
               ) : (
-                <div className="h-64 w-64 flex items-center justify-center bg-slate-100 text-sky-700">
+                <div className="h-72 w-72 flex items-center justify-center bg-slate-100 text-sky-700">
                   <QrCode className="h-16 w-16 animate-pulse" />
                 </div>
               )}

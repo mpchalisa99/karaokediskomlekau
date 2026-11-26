@@ -107,7 +107,6 @@ export const Player: React.FC = () => {
             playerRef.current = event.target;
             internalPlayerRef.current = event.target;
             try {
-              event.target.setPlaybackQuality?.('hd720');
               if (isMuted) {
                 event.target.mute();
               } else {
@@ -122,9 +121,6 @@ export const Player: React.FC = () => {
             if (event.data === 0) {
               handlePlayerEnded();
             } else if (event.data === 1) {
-              try {
-                event.target.setPlaybackQuality?.('hd720');
-              } catch {}
               setIsPlaying(true);
             } else if (event.data === 2) {
               setIsPlaying(false);
@@ -163,9 +159,7 @@ export const Player: React.FC = () => {
           internalPlayerRef.current.loadVideoById({
             videoId: currentSong.id,
             startSeconds: 0,
-            suggestedQuality: 'hd720',
           });
-          internalPlayerRef.current.setPlaybackQuality?.('hd720');
           if (!isMuted) {
             internalPlayerRef.current.unMute?.();
             internalPlayerRef.current.setVolume?.(audioVolume);
@@ -232,7 +226,7 @@ export const Player: React.FC = () => {
           notifyPlaybackTime(cur, dur);
         }
       } catch (e) {}
-    }, 500);
+    }, 1000);
 
     return () => clearInterval(interval);
   }, [isPlaying, isPlayerReady, notifyPlaybackTime]);

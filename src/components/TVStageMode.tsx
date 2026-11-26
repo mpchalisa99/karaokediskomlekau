@@ -261,19 +261,19 @@ export const TVStageMode: React.FC<TVStageModeProps> = ({ standalone = false }) 
 
   const clientUrl = getUniversalBarcodeUrl(roomId, networkInfo);
 
-  // Instant fallback QR code URL so it never renders blank
-  const instantFallbackQr = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(
+  // Instant fallback QR code URL so it never renders blank (margin=4 quiet zone for instant camera lock)
+  const instantFallbackQr = `https://api.qrserver.com/v1/create-qr-code/?size=480x480&ecc=M&data=${encodeURIComponent(
     clientUrl
-  )}&color=000000&bgcolor=ffffff&margin=2`;
+  )}&color=000000&bgcolor=ffffff&margin=4`;
 
-  // High-definition local QRCode generation
+  // High-definition local QRCode generation (ISO quiet zone margin: 4 & pixelated crisp modules)
   useEffect(() => {
     if (!isTvMode && !standalone) return;
     let isMounted = true;
 
     QRCode.toDataURL(clientUrl, {
-      width: 280,
-      margin: 1,
+      width: 520,
+      margin: 4,
       color: {
         dark: '#000000',
         light: '#ffffff',
@@ -461,11 +461,18 @@ export const TVStageMode: React.FC<TVStageModeProps> = ({ standalone = false }) 
                 <X style={{ width: '16px', height: '16px' }} />
               </button>
             </div>
-            <div style={{ borderRadius: '16px', backgroundColor: '#ffffff', padding: '12px', border: '4px solid #fbbf24' }}>
+            <div style={{ borderRadius: '16px', backgroundColor: '#ffffff', padding: '16px', border: '4px solid #fbbf24' }}>
               <img
                 src={currentQrImage}
                 alt={`QR Code Ruang ${roomId}`}
-                style={{ width: '220px', height: '220px', objectFit: 'contain', display: 'block' }}
+                style={{
+                  width: '300px',
+                  height: '300px',
+                  objectFit: 'contain',
+                  display: 'block',
+                  imageRendering: 'pixelated',
+                  backgroundColor: '#ffffff',
+                }}
               />
             </div>
             <div style={{ marginTop: '16px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
@@ -1509,11 +1516,11 @@ export const TVStageMode: React.FC<TVStageModeProps> = ({ standalone = false }) 
                 display: 'flex',
                 flexDirection: 'column',
                 alignItems: 'center',
-                padding: '4px',
-                borderRadius: '8px',
+                padding: '8px',
+                borderRadius: '10px',
                 backgroundColor: '#ffffff',
                 color: '#000000',
-                border: '1px solid #38bdf8',
+                border: '2px solid #38bdf8',
                 cursor: 'pointer',
                 boxSizing: 'border-box',
               }}
@@ -1522,14 +1529,23 @@ export const TVStageMode: React.FC<TVStageModeProps> = ({ standalone = false }) 
               <img
                 src={currentQrImage}
                 alt={`Scan Barcode Room ${roomId}`}
-                style={{ width: '60px', height: '60px', minWidth: '60px', minHeight: '60px', objectFit: 'contain', backgroundColor: '#ffffff' }}
+                style={{
+                  width: '132px',
+                  height: '132px',
+                  minWidth: '132px',
+                  minHeight: '132px',
+                  objectFit: 'contain',
+                  imageRendering: 'pixelated',
+                  backgroundColor: '#ffffff',
+                  display: 'block',
+                }}
               />
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', marginTop: '2px', lineHeight: 1 }}>
-                <span style={{ fontSize: '8px', fontWeight: 900, textTransform: 'uppercase', color: '#082f49', letterSpacing: '0.05em' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', marginTop: '4px', lineHeight: 1.1 }}>
+                <span style={{ fontSize: '9.5px', fontWeight: 900, textTransform: 'uppercase', color: '#082f49', letterSpacing: '0.05em' }}>
                   SCAN BARCODE
                 </span>
-                <span style={{ fontSize: '7px', fontWeight: 700, color: '#64748b', marginTop: '2px' }}>
-                  Remote &amp; Mic HP
+                <span style={{ fontSize: '8px', fontWeight: 700, color: '#475569', marginTop: '2px' }}>
+                  Remote &amp; Mic HP (Klik Zoom)
                 </span>
               </div>
             </div>

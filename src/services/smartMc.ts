@@ -652,13 +652,13 @@ export function calculateSmartMcDisplayDurationMs(
     .split(/\s+/)
     .filter(Boolean).length;
 
-  // Hitung estimasi waktu baca wajar (sekitar 60ms/karakter atau 480ms/kata + 5.5 detik jeda visual HUD)
-  const charBasedMs = 7500 + charCount * 58;
-  const wordBasedMs = 7000 + wordCount * 460;
+  // Hitung estimasi waktu baca wajar pada kecepatan 1.28x (sekitar 45ms/karakter atau 360ms/kata + jeda visual HUD)
+  const charBasedMs = 6000 + charCount * 45;
+  const wordBasedMs = 5500 + wordCount * 360;
   const computedMs = Math.max(charBasedMs, wordBasedMs);
 
-  // Minimum 18 detik (atau 20-25s untuk teks standar) agar terbaca utuh; batas atas aman 40 detik
-  return Math.max(18500, Math.min(40000, Math.round(computedMs)));
+  // Minimum 14.5 detik agar terbaca utuh tanpa terlalu lama; batas atas aman 34 detik
+  return Math.max(14500, Math.min(34000, Math.round(computedMs)));
 }
 
 /**
@@ -722,8 +722,8 @@ function tryBrowserSpeechFallback(
     window.speechSynthesis.cancel();
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = 'id-ID';
-    utterance.rate = 0.96;
-    utterance.pitch = 1.1;
+    utterance.rate = 1.28;
+    utterance.pitch = 1.12;
     utterance.volume = 1.0;
 
     let voices: SpeechSynthesisVoice[] = [];
@@ -794,6 +794,8 @@ export function stopSmartMcSpeech(): void {
     try {
       activeMcAudioRef.onended = null;
       activeMcAudioRef.onerror = null;
+      activeMcAudioRef.onloadedmetadata = null;
+      activeMcAudioRef.onplaying = null;
       activeMcAudioRef.pause();
       if (activeMcAudioRef !== unlockedAudioPoolEl) {
         activeMcAudioRef.src = '';
@@ -857,6 +859,8 @@ export function playSmartMcAudio(
       try {
         activeMcAudioRef.onended = null;
         activeMcAudioRef.onerror = null;
+        activeMcAudioRef.onloadedmetadata = null;
+        activeMcAudioRef.onplaying = null;
       } catch {}
       activeMcAudioRef = null;
     }
@@ -882,8 +886,8 @@ export function playSmartMcAudio(
   const offlineFallbacks = SMART_MC_OFFLINE_FALLBACK_FILES[resolvedTier] || SMART_MC_OFFLINE_FALLBACK_FILES.manual;
   const candidateFiles = [ttsEndpoint, ...offlineFallbacks];
 
-  // Safety timer dinamis agar pantun panjang tidak terpotong di tengah pembacaan
-  const dynamicAudioLimitMs = Math.min(42000, Math.max(20000, resolvedText.length * 135 + 6500));
+  // Safety timer dinamis disesuaikan dengan kecepatan baca 1.28x
+  const dynamicAudioLimitMs = Math.min(36000, Math.max(15000, resolvedText.length * 105 + 5500));
   const startedAt = Date.now();
   const scheduleSafetyTimer = (delayMs: number) => {
     if (fallbackSpeechTimerRef) {
@@ -941,11 +945,25 @@ export function playSmartMcAudio(
 
     try {
       const audio = index === 0 && unlockedAudioPoolEl ? unlockedAudioPoolEl : new Audio();
+      const targetRate = isTtsOrVoiceMp3 ? 1.28 : 1.0;
+      const applyVoiceSpeed = () => {
+        try {
+          audio.defaultPlaybackRate = targetRate;
+          audio.playbackRate = targetRate;
+          if ('preservesPitch' in audio) (audio as any).preservesPitch = true;
+          if ('mozPreservesPitch' in audio) (audio as any).mozPreservesPitch = true;
+          if ('webkitPreservesPitch' in audio) (audio as any).webkitPreservesPitch = true;
+        } catch {}
+      };
+
       audio.onended = null;
       audio.onerror = null;
+      audio.onloadedmetadata = applyVoiceSpeed;
+      audio.onplaying = applyVoiceSpeed;
       audio.src = src;
       audio.preload = 'auto';
       audio.volume = 1.0;
+      applyVoiceSpeed();
       activeMcAudioRef = audio;
 
       const advanceToNext = () => {
@@ -954,6 +972,8 @@ export function playSmartMcAudio(
         try {
           audio.onended = null;
           audio.onerror = null;
+          audio.onloadedmetadata = null;
+          audio.onplaying = null;
           audio.pause();
         } catch {}
         if (activeMcAudioRef === audio) {
@@ -971,8 +991,9 @@ export function playSmartMcAudio(
       audio.onerror = advanceToNext;
 
       const playPromise = audio.play();
-      if (playPromise && typeof playPromise.catch === 'function') {
-        playPromise.catch(advanceToNext);
+      applyVoiceSpeed();
+      if (playPromise && typeof playPromise.then === 'function') {
+        playPromise.then(applyVoiceSpeed).catch(advanceToNext);
       }
     } catch {
       if (!attemptSettled) {

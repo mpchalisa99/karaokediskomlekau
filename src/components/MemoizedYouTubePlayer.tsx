@@ -12,6 +12,7 @@ interface MemoizedTvYouTubeEmbedProps {
  * Komponen iframe TIDAK pernah di-render ulang ketika state Smart MC, antrean lagu,
  * timer, reaksi sorak, atau skor Dewan Juri berubah.
  * Iframe hanya berganti ketika videoId lagu berubah.
+ * Dioptimalkan untuk koneksi data video lancar tanpa lag/re-buffering (Adaptive Bitrate alami + GPU layer).
  */
 const TvYouTubeEmbedComponent: React.FC<MemoizedTvYouTubeEmbedProps> = ({
   videoId,
@@ -20,11 +21,26 @@ const TvYouTubeEmbedComponent: React.FC<MemoizedTvYouTubeEmbedProps> = ({
   isMuted,
 }) => {
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  const audioVolumeRef = useRef<number>(audioVolume);
+  const isMutedRef = useRef<boolean>(isMuted);
+  const isPlayingRef = useRef<boolean>(isPlaying);
+
+  useEffect(() => {
+    audioVolumeRef.current = audioVolume;
+  }, [audioVolume]);
+
+  useEffect(() => {
+    isMutedRef.current = isMuted;
+  }, [isMuted]);
+
+  useEffect(() => {
+    isPlayingRef.current = isPlaying;
+  }, [isPlaying]);
 
   const videoOrigin = typeof window !== 'undefined' ? window.location.origin : '';
-  // Parameter YouTube embed ringan khusus Smart TV Samsung Tizen OS (iv_load_policy=3, rel=0, modestbranding=1, vq=hd720, wmode=opaque)
+  // Parameter YouTube embed ringan tanpa memaksa vq=hd720 agar Adaptive Bitrate menyesuaikan bandwidth tanpa lag
   const iframeSrc = videoId
-    ? `https://www.youtube.com/embed/${videoId}?autoplay=1&enablejsapi=1&rel=0&iv_load_policy=3&playsinline=1&controls=0&modestbranding=1&vq=hd720&wmode=opaque&origin=${encodeURIComponent(
+    ? `https://www.youtube.com/embed/${videoId}?autoplay=1&enablejsapi=1&rel=0&iv_load_policy=3&playsinline=1&controls=0&modestbranding=1&origin=${encodeURIComponent(
         videoOrigin
       )}`
     : '';
@@ -69,103 +85,95 @@ const TvYouTubeEmbedComponent: React.FC<MemoizedTvYouTubeEmbedProps> = ({
     } catch {}
   }, [audioVolume, isMuted]);
 
-  // Jaminan autoplay instan & kunci kualitas stabil 720p saat videoId baru dimuat di TV Tizen OS
+  // Registrasi listener & autoplay satu kali aman tanpa spam postMessage / paksa setPlaybackQuality
   useEffect(() => {
     if (!videoId) return;
 
-    const triggerTvAutoplayAnd720p = () => {
+    const sendSingleSafetyInit = () => {
       const win = iframeRef.current?.contentWindow;
       if (!win) return;
       try {
         win.postMessage(JSON.stringify({ event: 'listening', id: 1 }), '*');
         win.postMessage(
-          JSON.stringify({ event: 'command', func: 'setPlaybackQuality', args: ['hd720'] }),
+          JSON.stringify({ event: 'command', func: isMutedRef.current ? 'mute' : 'unMute', args: [] }),
           '*'
         );
         win.postMessage(
-          JSON.stringify({ event: 'command', func: isMuted ? 'mute' : 'unMute', args: [] }),
+          JSON.stringify({ event: 'command', func: 'setVolume', args: [audioVolumeRef.current] }),
           '*'
         );
-        win.postMessage(
-          JSON.stringify({ event: 'command', func: 'setVolume', args: [audioVolume] }),
-          '*'
-        );
-        win.postMessage(
-          JSON.stringify({ event: 'command', func: 'playVideo', args: [] }),
-          '*'
-        );
+        if (isPlayingRef.current) {
+          win.postMessage(
+            JSON.stringify({ event: 'command', func: 'playVideo', args: [] }),
+            '*'
+          );
+        }
       } catch {}
     };
 
-    triggerTvAutoplayAnd720p();
-    const t1 = setTimeout(triggerTvAutoplayAnd720p, 200);
-    const t2 = setTimeout(triggerTvAutoplayAnd720p, 600);
-    const t3 = setTimeout(triggerTvAutoplayAnd720p, 1300);
-    const t4 = setTimeout(triggerTvAutoplayAnd720p, 2200);
-
-    // Heartbeat listening agar YouTube iframe mengirimkan infoDelivery ke window
-    const listeningInterval = setInterval(() => {
-      const win = iframeRef.current?.contentWindow;
-      if (!win) return;
-      try {
-        win.postMessage(JSON.stringify({ event: 'listening', id: 1 }), '*');
-      } catch {}
-    }, 2000);
-
+    const safetyTimer = setTimeout(sendSingleSafetyInit, 750);
     return () => {
-      clearTimeout(t1);
-      clearTimeout(t2);
-      clearTimeout(t3);
-      clearTimeout(t4);
-      clearInterval(listeningInterval);
+      clearTimeout(safetyTimer);
     };
   }, [videoId]);
 
   if (!videoId || !iframeSrc) return null;
 
   return (
-    <iframe
-      ref={iframeRef}
-      key={videoId}
-      src={iframeSrc}
-      className="tv-stage-iframe"
+    <div
       style={{
         width: '100%',
         height: '100%',
-        border: 0,
-        display: 'block',
-        backgroundColor: '#000000',
         position: 'relative',
-        zIndex: 1,
+        backgroundColor: '#000000',
+        transform: 'translateZ(0)',
+        willChange: 'transform',
+        backfaceVisibility: 'hidden',
       }}
-      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-      allowFullScreen
-      title="DISKOMLEK KARAOKE Video Player"
-      onLoad={() => {
-        try {
-          const win = iframeRef.current?.contentWindow;
-          if (win) {
-            win.postMessage(JSON.stringify({ event: 'listening', id: 1 }), '*');
-            win.postMessage(
-              JSON.stringify({ event: 'command', func: 'setPlaybackQuality', args: ['hd720'] }),
-              '*'
-            );
-            win.postMessage(
-              JSON.stringify({ event: 'command', func: isMuted ? 'mute' : 'unMute', args: [] }),
-              '*'
-            );
-            win.postMessage(
-              JSON.stringify({ event: 'command', func: 'setVolume', args: [audioVolume] }),
-              '*'
-            );
-            win.postMessage(
-              JSON.stringify({ event: 'command', func: 'playVideo', args: [] }),
-              '*'
-            );
-          }
-        } catch {}
-      }}
-    />
+    >
+      <iframe
+        ref={iframeRef}
+        key={videoId}
+        src={iframeSrc}
+        loading="eager"
+        className="tv-stage-iframe"
+        style={{
+          width: '100%',
+          height: '100%',
+          border: 0,
+          display: 'block',
+          backgroundColor: '#000000',
+          position: 'relative',
+          zIndex: 1,
+          transform: 'translateZ(0)',
+        }}
+        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+        allowFullScreen
+        title="DISKOMLEK KARAOKE Video Player"
+        onLoad={() => {
+          try {
+            const win = iframeRef.current?.contentWindow;
+            if (win) {
+              win.postMessage(JSON.stringify({ event: 'listening', id: 1 }), '*');
+              win.postMessage(
+                JSON.stringify({ event: 'command', func: isMutedRef.current ? 'mute' : 'unMute', args: [] }),
+                '*'
+              );
+              win.postMessage(
+                JSON.stringify({ event: 'command', func: 'setVolume', args: [audioVolumeRef.current] }),
+                '*'
+              );
+              if (isPlayingRef.current) {
+                win.postMessage(
+                  JSON.stringify({ event: 'command', func: 'playVideo', args: [] }),
+                  '*'
+                );
+              }
+            }
+          } catch {}
+        }}
+      />
+    </div>
   );
 };
 
@@ -190,6 +198,9 @@ export const MemoizedMasterYouTubeTarget = React.memo(
         height: '100%',
         display: hidden ? 'none' : 'block',
         backgroundColor: '#000000',
+        transform: 'translateZ(0)',
+        willChange: 'transform',
+        backfaceVisibility: 'hidden',
       }}
     >
       <div id="karaoke-yt-iframe-target" style={{ width: '100%', height: '100%', position: 'relative', zIndex: 1 }} />

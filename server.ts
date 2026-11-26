@@ -39,6 +39,7 @@ interface RoomState {
   history: any[];
   clients: Map<string, ConnectedClient>;
   juryVotes: Map<string, any>;
+  pendingCommands: { id: string; action: string; payload: any; senderName?: string; timestamp: number }[];
   lastUpdated: number;
   lastSkipAt?: number;
   musicDelayMs: number;
@@ -67,6 +68,7 @@ function getOrCreateRoom(roomId: string): RoomState {
       history: [],
       clients: new Map(),
       juryVotes: new Map(),
+      pendingCommands: [],
       lastUpdated: Date.now(),
       lastSkipAt: 0,
       musicDelayMs: 70,
@@ -1081,13 +1083,54 @@ async function startServer() {
   });
 
   // Vercel-compatible /api/room-sync endpoint for Smart TV Samsung (Tizen OS) & Android TV 13
+  const touchExpressSyncClient = (room: RoomState, clientId?: string, singerName?: string, role?: string) => {
+    const now = Date.now();
+    for (const [k, c] of room.clients.entries()) {
+      if (!c.ws && !c.sseRes && now - (c.lastSeen || c.connectedAt || 0) > 25000) {
+        room.clients.delete(k);
+      }
+    }
+    if (clientId && typeof clientId === 'string' && clientId.trim()) {
+      const cleanClientId = clientId.trim().slice(0, 64);
+      const resolvedRole: 'master' | 'client' = role === 'master' ? 'master' : 'client';
+      const resolvedName =
+        (singerName && typeof singerName === 'string' ? singerName.trim().slice(0, 48) : '') ||
+        (resolvedRole === 'master' ? 'Layar Utama' : 'Prajurit (HP)');
+      const existing = room.clients.get(cleanClientId);
+      room.clients.set(cleanClientId, {
+        ...(existing || { id: cleanClientId, connectedAt: now }),
+        id: cleanClientId,
+        name: resolvedName,
+        role: resolvedRole,
+        lastSeen: now,
+      });
+    }
+  };
+
+  const pushExpressCommand = (room: RoomState, action: string, payload: any, senderName?: string, cmdId?: string) => {
+    const now = Date.now();
+    const id = (cmdId || `cmd-${now}-${Math.random().toString(36).substring(2, 7)}`).trim();
+    if (room.pendingCommands.some((c) => c.id === id)) return;
+    room.pendingCommands.push({ id, action, payload, senderName, timestamp: now });
+    if (room.pendingCommands.length > 30) {
+      room.pendingCommands = room.pendingCommands.slice(-30);
+    }
+  };
+
   app.get('/api/room-sync', (req, res) => {
     res.setHeader('Cache-Control', 'no-store, max-age=0');
     const rawRoom = (req.query.room || req.query.roomId || 'ROOM-1001') as string;
+    const clientId = req.query.clientId as string | undefined;
+    const singerName = req.query.singerName as string | undefined;
+    const role = req.query.role as string | undefined;
     const room = getOrCreateRoom(rawRoom);
+    touchExpressSyncClient(room, clientId, singerName, role);
+    const clientSummaries = getRoomClientSummaries(room);
+    const clientCount = Math.max(1, room.clients.size);
     return res.json({
       success: true,
       roomId: room.roomId,
+      clientCount,
       room: {
         roomId: room.roomId,
         nowPlaying: room.currentSong,
@@ -1101,7 +1144,9 @@ async function startServer() {
         musicDelayMs: room.musicDelayMs ?? 70,
         musicVolume: room.musicVolume ?? 100,
         isMuted: room.isMuted ?? false,
-        clientCount: room.clients.size,
+        clients: clientSummaries,
+        clientCount,
+        pendingCommands: room.pendingCommands,
         juryVotes: Array.from(room.juryVotes.values()),
         lastUpdated: room.lastUpdated,
       },
@@ -1111,12 +1156,33 @@ async function startServer() {
   app.post('/api/room-sync', (req, res) => {
     res.setHeader('Cache-Control', 'no-store, max-age=0');
     const body = req.body || {};
-    const { roomId, action, song, singerName, priority, queueId, requestId, consumedQueueId, payload, announcement } = body;
+    const {
+      roomId,
+      action,
+      song,
+      singerName,
+      priority,
+      queueId,
+      requestId,
+      consumedQueueId,
+      payload,
+      announcement,
+      clientId,
+      role,
+      commandId,
+    } = body;
     const room = getOrCreateRoom(roomId || payload?.roomId);
     const cleanSinger = (singerName || payload?.singerName || 'Prajurit (HP)').trim();
     const now = Date.now();
+    const resolvedClientId = clientId || payload?.clientId;
+    const resolvedRole = role || payload?.role || (payload?.fromMaster ? 'master' : 'client');
+    touchExpressSyncClient(room, resolvedClientId, cleanSinger, resolvedRole);
 
     switch (action) {
+      case 'HEARTBEAT':
+      case 'PING':
+        break;
+
       case 'ADD_QUEUE': {
         const targetSong = song || payload?.song;
         if (!targetSong || !targetSong.id) {
@@ -1134,6 +1200,7 @@ async function startServer() {
           action,
           item,
           isCurrent,
+          clientCount: Math.max(1, room.clients.size),
           room: {
             roomId: room.roomId,
             nowPlaying: room.currentSong,
@@ -1141,6 +1208,8 @@ async function startServer() {
             currentSinger: room.currentSinger ?? null,
             isPlaying: room.isPlaying,
             queue: room.queue,
+            clients: getRoomClientSummaries(room),
+            clientCount: Math.max(1, room.clients.size),
             lastUpdated: room.lastUpdated,
           },
         });
@@ -1156,13 +1225,17 @@ async function startServer() {
           room.currentSong = targetSong;
           room.currentSinger = cleanSinger;
           room.isPlaying = true;
+          room.juryVotes.clear();
           room.lastUpdated = now;
-          broadcastToRoom(room, {
-            type: 'PLAY_NOW',
-            roomId: room.roomId,
-            payload: { song: targetSong, singerName: cleanSinger },
-            timestamp: now,
-          });
+          if (!payload?.fromMaster) {
+            pushExpressCommand(room, 'PLAY_NOW', { song: targetSong, singerName: cleanSinger }, cleanSinger, commandId);
+            broadcastToRoom(room, {
+              type: 'PLAY_NOW',
+              roomId: room.roomId,
+              payload: { song: targetSong, singerName: cleanSinger },
+              timestamp: now,
+            });
+          }
           broadcastToRoom(room, {
             type: 'STATE_UPDATE',
             roomId: room.roomId,
@@ -1171,7 +1244,7 @@ async function startServer() {
               currentSinger: room.currentSinger,
               isPlaying: true,
               queue: room.queue,
-              clientCount: room.clients.size,
+              clientCount: Math.max(1, room.clients.size),
             },
             timestamp: now,
           });
@@ -1183,6 +1256,7 @@ async function startServer() {
         room.currentSong = null;
         room.currentSinger = null;
         room.isPlaying = false;
+        room.juryVotes.clear();
         room.lastUpdated = now;
         break;
       }
@@ -1192,12 +1266,42 @@ async function startServer() {
         if (targetId) {
           room.queue = room.queue.filter((q) => q.queueId !== targetId);
           room.lastUpdated = now;
-          broadcastToRoom(room, {
-            type: 'REMOVE_QUEUE_ITEM',
-            roomId: room.roomId,
-            payload: { queueId: targetId, queue: room.queue },
-            timestamp: now,
-          });
+          if (!payload?.fromMaster) {
+            pushExpressCommand(room, 'REMOVE_QUEUE', { queueId: targetId }, cleanSinger, commandId);
+            broadcastToRoom(room, {
+              type: 'REMOVE_QUEUE_ITEM',
+              roomId: room.roomId,
+              payload: { queueId: targetId, queue: room.queue },
+              timestamp: now,
+            });
+          }
+        }
+        break;
+      }
+
+      case 'REORDER_QUEUE': {
+        const fromIdx = typeof body.fromIndex === 'number' ? body.fromIndex : payload?.fromIndex;
+        const toIdx = typeof body.toIndex === 'number' ? body.toIndex : payload?.toIndex;
+        if (
+          typeof fromIdx === 'number' &&
+          typeof toIdx === 'number' &&
+          fromIdx >= 0 &&
+          toIdx >= 0 &&
+          fromIdx < room.queue.length &&
+          toIdx < room.queue.length
+        ) {
+          const [moved] = room.queue.splice(fromIdx, 1);
+          if (moved) room.queue.splice(toIdx, 0, moved);
+          room.lastUpdated = now;
+          if (!payload?.fromMaster) {
+            pushExpressCommand(room, 'REORDER_QUEUE', { fromIndex: fromIdx, toIndex: toIdx, queue: room.queue }, cleanSinger, commandId);
+            broadcastToRoom(room, {
+              type: 'SYNC_QUEUE',
+              roomId: room.roomId,
+              payload: { queue: room.queue, senderName: cleanSinger },
+              timestamp: now,
+            });
+          }
         }
         break;
       }
@@ -1220,13 +1324,129 @@ async function startServer() {
           room.currentSinger = null;
           room.isPlaying = false;
         }
+        room.juryVotes.clear();
         room.lastUpdated = now;
-        broadcastToRoom(room, {
-          type: 'SKIP_NEXT',
-          roomId: room.roomId,
-          payload: { currentSong: room.currentSong, currentSinger: room.currentSinger, queue: room.queue },
-          timestamp: now,
-        });
+        if (!payload?.fromMaster) {
+          pushExpressCommand(room, 'SKIP_NEXT', { currentSong: room.currentSong, currentSinger: room.currentSinger, queue: room.queue }, cleanSinger, commandId);
+          broadcastToRoom(room, {
+            type: 'SKIP_NEXT',
+            roomId: room.roomId,
+            payload: { currentSong: room.currentSong, currentSinger: room.currentSinger, queue: room.queue },
+            timestamp: now,
+          });
+        }
+        break;
+      }
+
+      case 'TOGGLE_PAUSE':
+      case 'PLAY':
+      case 'PAUSE': {
+        const nextPlaying =
+          action === 'PLAY'
+            ? true
+            : action === 'PAUSE'
+            ? false
+            : typeof body.isPlaying === 'boolean'
+            ? body.isPlaying
+            : typeof payload?.isPlaying === 'boolean'
+            ? payload.isPlaying
+            : !room.isPlaying;
+        room.isPlaying = nextPlaying;
+        room.lastUpdated = now;
+        if (!payload?.fromMaster) {
+          pushExpressCommand(room, 'TOGGLE_PAUSE', { isPlaying: nextPlaying }, cleanSinger, commandId);
+          broadcastToRoom(room, {
+            type: 'TOGGLE_PAUSE',
+            roomId: room.roomId,
+            payload: { isPlaying: nextPlaying, senderName: cleanSinger },
+            timestamp: now,
+          });
+        }
+        break;
+      }
+
+      case 'SET_VOLUME':
+      case 'SET_MUSIC_VOLUME': {
+        const rawVol = typeof body.volume === 'number' ? body.volume : typeof payload?.volume === 'number' ? payload.volume : room.musicVolume;
+        const clampedVol = Math.max(0, Math.min(100, Math.round(rawVol)));
+        const nextMuted = typeof body.isMuted === 'boolean' ? body.isMuted : typeof payload?.isMuted === 'boolean' ? payload.isMuted : room.isMuted;
+        room.musicVolume = clampedVol;
+        room.isMuted = nextMuted;
+        room.lastUpdated = now;
+        if (!payload?.fromMaster) {
+          pushExpressCommand(room, 'SET_MUSIC_VOLUME', { volume: clampedVol, isMuted: nextMuted, senderName: cleanSinger }, cleanSinger, commandId);
+          broadcastToRoom(room, {
+            type: 'SET_MUSIC_VOLUME',
+            roomId: room.roomId,
+            payload: { volume: clampedVol, isMuted: nextMuted, senderName: cleanSinger },
+            timestamp: now,
+          });
+        }
+        break;
+      }
+
+      case 'PLAY_SOUND_FX': {
+        const sound = body.sound || payload?.sound;
+        if (sound) {
+          pushExpressCommand(room, 'PLAY_SOUND_FX', { sound, senderName: cleanSinger }, cleanSinger, commandId);
+          broadcastToRoom(room, {
+            type: 'PLAY_SOUND_FX',
+            roomId: room.roomId,
+            payload: { sound, senderName: cleanSinger },
+            timestamp: now,
+          });
+        }
+        break;
+      }
+
+      case 'SET_MUSIC_DELAY': {
+        const rawDelay = typeof body.delayMs === 'number' ? body.delayMs : payload?.delayMs;
+        if (typeof rawDelay === 'number') {
+          const clampedDelay = Math.max(0, Math.min(250, Math.round(rawDelay)));
+          room.musicDelayMs = clampedDelay;
+          room.lastUpdated = now;
+          if (!payload?.fromMaster) {
+            pushExpressCommand(room, 'SET_MUSIC_DELAY', { delayMs: clampedDelay }, cleanSinger, commandId);
+            broadcastToRoom(room, {
+              type: 'MUSIC_SYNC_DELAY',
+              roomId: room.roomId,
+              payload: { delayMs: clampedDelay },
+              timestamp: now,
+            });
+          }
+        }
+        break;
+      }
+
+      case 'SUBMIT_JURY_SCORE': {
+        const rawScore = typeof body.score === 'number' ? body.score : payload?.score;
+        const jName = (body.juryName || payload?.juryName || cleanSinger || 'Prajurit (HP)').trim();
+        const cId = (resolvedClientId || jName.toLowerCase()).trim();
+        if (typeof rawScore === 'number') {
+          const vote = {
+            clientId: cId,
+            juryName: jName,
+            score: Math.max(0, Math.min(100, Math.round(rawScore))),
+            songId: body.songId || payload?.songId || room.currentSong?.id || '',
+            songTitle: room.currentSong?.title || '',
+            submittedAt: now,
+          };
+          const norm = jName.toLowerCase();
+          for (const [k, existing] of room.juryVotes.entries()) {
+            if ((existing.juryName || '').trim().toLowerCase() === norm || existing.clientId === cId) {
+              room.juryVotes.delete(k);
+            }
+          }
+          room.juryVotes.set(cId, vote);
+          room.lastUpdated = now;
+          const allVotes = Array.from(room.juryVotes.values());
+          broadcastToRoom(room, {
+            type: 'SUBMIT_JURY_SCORE',
+            roomId: room.roomId,
+            payload: { votes: allVotes, lastVote: vote },
+            timestamp: now,
+          });
+        }
         break;
       }
 
@@ -1277,13 +1497,30 @@ async function startServer() {
         break;
       }
 
+      case 'SMART_MC_STATUS': {
+        if (typeof payload?.isSpeaking === 'boolean') room.isMcSpeaking = payload.isSpeaking;
+        if (typeof payload?.isVisible === 'boolean') room.isSmartMcVisible = payload.isVisible;
+        room.lastUpdated = now;
+        break;
+      }
+
       case 'SYNC_STATE': {
         if (payload?.currentSong !== undefined) room.currentSong = payload.currentSong;
         if (payload?.currentSinger !== undefined) room.currentSinger = payload.currentSinger;
         if (typeof payload?.isPlaying === 'boolean') room.isPlaying = payload.isPlaying;
-        if (Array.isArray(payload?.queue)) room.queue = payload.queue;
+        if (typeof payload?.musicDelayMs === 'number') room.musicDelayMs = Math.max(0, Math.min(250, Math.round(payload.musicDelayMs)));
+        if (typeof payload?.musicVolume === 'number') room.musicVolume = Math.max(0, Math.min(100, Math.round(payload.musicVolume)));
+        if (typeof payload?.isMuted === 'boolean') room.isMuted = payload.isMuted;
+        if (typeof payload?.isMcSpeaking === 'boolean') room.isMcSpeaking = payload.isMcSpeaking;
         if (typeof payload?.isSmartMcVisible === 'boolean') room.isSmartMcVisible = payload.isSmartMcVisible;
         if (payload?.activeMcAnnouncement !== undefined) room.activeMcAnnouncement = payload.activeMcAnnouncement;
+        if (Array.isArray(payload?.queue)) {
+          const incomingIds = new Set(payload.queue.map((q: any) => q?.queueId).filter(Boolean));
+          const recentUnseenClientItems = room.queue.filter(
+            (q) => q && q.queueId && !incomingIds.has(q.queueId) && now - (q.addedAt || 0) < 4000
+          );
+          room.queue = [...payload.queue, ...recentUnseenClientItems];
+        }
         room.lastUpdated = now;
         break;
       }
@@ -1292,14 +1529,23 @@ async function startServer() {
     return res.json({
       success: true,
       action,
+      clientCount: Math.max(1, room.clients.size),
       room: {
         roomId: room.roomId,
         nowPlaying: room.currentSong,
         currentSong: room.currentSong,
         currentSinger: room.currentSinger ?? null,
         isPlaying: room.isPlaying,
+        isMcSpeaking: Boolean(room.isMcSpeaking),
         isSmartMcVisible: Boolean(room.isSmartMcVisible),
         activeMcAnnouncement: room.activeMcAnnouncement ?? null,
+        musicDelayMs: room.musicDelayMs ?? 70,
+        musicVolume: room.musicVolume ?? 100,
+        isMuted: room.isMuted ?? false,
+        clients: getRoomClientSummaries(room),
+        clientCount: Math.max(1, room.clients.size),
+        pendingCommands: room.pendingCommands,
+        juryVotes: Array.from(room.juryVotes.values()),
         queue: room.queue,
         lastUpdated: room.lastUpdated,
       },

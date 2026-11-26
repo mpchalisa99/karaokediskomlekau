@@ -85,6 +85,14 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
         ('hp-' + Math.random().toString(36).substring(2, 9))
   ).current;
   const lastSyncTime = useRef<number>(Date.now());
+  const lastHttpSyncAtRef = useRef<number>(0);
+  const isServerlessRef = useRef<boolean>(false);
+  const isPollingSyncRef = useRef<boolean>(false);
+  const singerNameRef = useRef<string>(singerName);
+
+  useEffect(() => {
+    singerNameRef.current = singerName;
+  }, [singerName]);
 
   // Connection State
   const [isConnected, setIsConnected] = useState<boolean>(true);
@@ -193,6 +201,7 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
   const localStreamRef = useRef<MediaStream | null>(null);
   const reconnectPeerTimerRef = useRef<any>(null);
   const peerHeartbeatCleanRef = useRef<(() => void) | null>(null);
+  const connectToTvPeerRef = useRef<() => void>(() => {});
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const animFrameRef = useRef<number | null>(null);
@@ -261,16 +270,31 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
         payload: { delayMs: clamped },
       });
 
-      // 3. HTTP Fallback
-      fetch(`/api/room/${encodeURIComponent(roomId)}/music-delay`, {
+      // 3. Vercel /api/room-sync & Express Fallback
+      fetch('/api/room-sync', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ delayMs: clamped }),
+        body: JSON.stringify({
+          roomId,
+          action: 'SET_MUSIC_DELAY',
+          delayMs: clamped,
+          singerName: singerNameRef.current,
+          clientId,
+          role: 'client',
+        }),
       }).catch(() => {});
+
+      if (!isServerlessRef.current) {
+        fetch(`/api/room/${encodeURIComponent(roomId)}/music-delay`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ delayMs: clamped }),
+        }).catch(() => {});
+      }
 
       showToast(`⚡ Sinkron Musik TV: ${clamped}ms`);
     },
-    [roomId, sendWsReliable, sendPeerMessage, showToast]
+    [roomId, clientId, sendWsReliable, sendPeerMessage, showToast]
   );
 
   // Control Music Volume on Master TV from Mobile Client (HP)
@@ -292,7 +316,7 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
 
       // 2. PeerJS DataConnection P2P
       sendPeerMessage({
-        action: 'SET_MUSIC_VOLUME' as any,
+        action: 'SET_MUSIC_VOLUME',
         payload: {
           volume: clamped,
           isMuted: effectiveMute,
@@ -300,16 +324,32 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
         },
       });
 
-      // 3. HTTP Fallback
-      fetch(`/api/room/${encodeURIComponent(roomId)}/volume`, {
+      // 3. Vercel /api/room-sync & Express Fallback
+      fetch('/api/room-sync', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          roomId,
+          action: 'SET_MUSIC_VOLUME',
           volume: clamped,
           isMuted: effectiveMute,
-          senderName: singerName,
+          singerName,
+          clientId,
+          role: 'client',
         }),
       }).catch(() => {});
+
+      if (!isServerlessRef.current) {
+        fetch(`/api/room/${encodeURIComponent(roomId)}/volume`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            volume: clamped,
+            isMuted: effectiveMute,
+            senderName: singerName,
+          }),
+        }).catch(() => {});
+      }
 
       if (effectiveMute) {
         showToast('🔇 Musik TV dibisukan');
@@ -317,7 +357,7 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
         showToast(`🎵 Volume Musik TV: ${clamped}%`);
       }
     },
-    [roomId, isMusicMuted, singerName, sendWsReliable, sendPeerMessage, showToast]
+    [roomId, clientId, isMusicMuted, singerName, sendWsReliable, sendPeerMessage, showToast]
   );
 
   const handleToggleMusicMute = useCallback(() => {
@@ -384,98 +424,154 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
     showToast(`Nama disimpan: ${clean}`);
   };
 
-  // Fetch initial room state and send HTTP heartbeat ping (with Vercel /api/room-sync fallback)
+  // Fetch room state and send HTTP heartbeat (Vercel /api/room-sync + Express /api/room/:id/ping)
   const fetchRoomState = useCallback(async () => {
+    if (isPollingSyncRef.current) return;
+    isPollingSyncRef.current = true;
     let synced = false;
-    try {
-      const res = await fetch(`/api/room/${encodeURIComponent(roomId)}/ping`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ clientId, singerName, role: 'client' }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.success && data.room) {
-          synced = true;
-          lastSyncTime.current = Date.now();
-          setIsConnected(true);
-          setConnectionStatus('connected');
-          if (data.room.currentSong !== undefined) setCurrentSong(data.room.currentSong);
-          if (data.room.currentSinger !== undefined) setCurrentSinger(data.room.currentSinger);
-          if (typeof data.room.isPlaying === 'boolean') setIsPlaying(data.room.isPlaying);
-          if (typeof data.room.isMcSpeaking === 'boolean') setMcSpeakingLock(data.room.isMcSpeaking);
-          if (Array.isArray(data.room.queue)) setQueue(data.room.queue);
-          if (typeof data.room.musicDelayMs === 'number') setTvMusicDelay(data.room.musicDelayMs);
-          if (typeof data.room.musicVolume === 'number') setMusicVolume(data.room.musicVolume);
-          if (typeof data.room.isMuted === 'boolean') setIsMusicMuted(data.room.isMuted);
-          if (Array.isArray(data.room.juryVotes)) {
-            setJuryVotersList(data.room.juryVotes.map((v: any) => ({ juryName: v.juryName, score: v.score })));
-          }
-          if (data.clientCount !== undefined) setClientCount(data.clientCount);
-        }
-      }
-    } catch {}
 
-    if (!synced) {
-      try {
-        const syncRes = await fetch(`/api/room-sync?room=${encodeURIComponent(roomId)}`, {
-          cache: 'no-store',
-        });
-        if (syncRes.ok) {
-          const syncData = await syncRes.json();
-          if (syncData?.success && syncData?.room) {
-            synced = true;
-            lastSyncTime.current = Date.now();
-            setIsConnected(true);
-            setConnectionStatus('connected');
-            const r = syncData.room;
-            const playingSong = r.nowPlaying !== undefined ? r.nowPlaying : r.currentSong;
-            if (playingSong !== undefined) setCurrentSong(playingSong);
-            if (r.currentSinger !== undefined) setCurrentSinger(r.currentSinger);
-            if (typeof r.isPlaying === 'boolean') setIsPlaying(r.isPlaying);
-            if (typeof r.isMcSpeaking === 'boolean') setMcSpeakingLock(r.isMcSpeaking);
-            if (Array.isArray(r.queue)) setQueue(r.queue);
-            if (typeof r.musicVolume === 'number') setMusicVolume(r.musicVolume);
-            if (typeof r.isMuted === 'boolean') setIsMusicMuted(r.isMuted);
-            if (Array.isArray(r.juryVotes)) {
-              setJuryVotersList(r.juryVotes.map((v: any) => ({ juryName: v.juryName, score: v.score })));
+    try {
+      if (!isServerlessRef.current) {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 3500);
+        try {
+          const res = await fetch(`/api/room/${encodeURIComponent(roomId)}/ping`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ clientId, singerName: singerNameRef.current, role: 'client' }),
+            signal: controller.signal,
+          });
+          if (res.status === 404 || res.status === 405) {
+            isServerlessRef.current = true;
+          } else if (res.ok) {
+            const data = await res.json();
+            if (data.success && data.room) {
+              synced = true;
+              const now = Date.now();
+              lastSyncTime.current = now;
+              lastHttpSyncAtRef.current = now;
+              setIsConnected(true);
+              setConnectionStatus('connected');
+              if (data.room.currentSong !== undefined) setCurrentSong(data.room.currentSong);
+              if (data.room.currentSinger !== undefined) setCurrentSinger(data.room.currentSinger);
+              if (typeof data.room.isPlaying === 'boolean') setIsPlaying(data.room.isPlaying);
+              if (typeof data.room.isMcSpeaking === 'boolean') setMcSpeakingLock(data.room.isMcSpeaking);
+              if (Array.isArray(data.room.queue)) setQueue(data.room.queue);
+              if (typeof data.room.musicDelayMs === 'number') setTvMusicDelay(data.room.musicDelayMs);
+              if (typeof data.room.musicVolume === 'number') setMusicVolume(data.room.musicVolume);
+              if (typeof data.room.isMuted === 'boolean') setIsMusicMuted(data.room.isMuted);
+              if (Array.isArray(data.room.juryVotes)) {
+                setJuryVotersList(data.room.juryVotes.map((v: any) => ({ juryName: v.juryName, score: v.score })));
+              }
+              if (data.clientCount !== undefined) setClientCount(data.clientCount);
             }
           }
+        } catch {} finally {
+          clearTimeout(timeoutId);
         }
-      } catch {}
-    }
-
-    if (!synced) {
-      const elapsed = Date.now() - lastSyncTime.current;
-      if (typeof navigator !== 'undefined' && navigator.onLine === false) {
-        setIsConnected(false);
-        setConnectionStatus('disconnected');
-      } else if (elapsed > 15000) {
-        setIsConnected(false);
-        setConnectionStatus('disconnected');
-      } else if (elapsed > 7000) {
-        setIsConnected(false);
-        setConnectionStatus('reconnecting');
       }
+
+      if (!synced) {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 3500);
+        try {
+          const syncRes = await fetch(
+            `/api/room-sync?room=${encodeURIComponent(roomId)}&clientId=${encodeURIComponent(clientId)}&singerName=${encodeURIComponent(singerNameRef.current)}&role=client`,
+            {
+              cache: 'no-store',
+              signal: controller.signal,
+            }
+          );
+          if (syncRes.ok) {
+            const syncData = await syncRes.json();
+            if (syncData?.success && syncData?.room) {
+              synced = true;
+              const now = Date.now();
+              lastSyncTime.current = now;
+              lastHttpSyncAtRef.current = now;
+              setIsConnected(true);
+              setConnectionStatus('connected');
+              const r = syncData.room;
+              const playingSong = r.nowPlaying !== undefined ? r.nowPlaying : r.currentSong;
+              if (playingSong !== undefined) setCurrentSong(playingSong);
+              if (r.currentSinger !== undefined) setCurrentSinger(r.currentSinger);
+              if (typeof r.isPlaying === 'boolean') setIsPlaying(r.isPlaying);
+              if (typeof r.isMcSpeaking === 'boolean') setMcSpeakingLock(r.isMcSpeaking);
+              if (Array.isArray(r.queue)) setQueue(r.queue);
+              if (typeof r.musicDelayMs === 'number') setTvMusicDelay(r.musicDelayMs);
+              if (typeof r.musicVolume === 'number') setMusicVolume(r.musicVolume);
+              if (typeof r.isMuted === 'boolean') setIsMusicMuted(r.isMuted);
+              if (typeof syncData.clientCount === 'number') {
+                setClientCount(syncData.clientCount);
+              } else if (typeof r.clientCount === 'number') {
+                setClientCount(r.clientCount);
+              }
+              if (Array.isArray(r.juryVotes)) {
+                setJuryVotersList(r.juryVotes.map((v: any) => ({ juryName: v.juryName, score: v.score })));
+              }
+            }
+          }
+        } catch {} finally {
+          clearTimeout(timeoutId);
+        }
+      }
+
+      if (!synced) {
+        const elapsed = Date.now() - lastSyncTime.current;
+        if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+          setIsConnected(false);
+          setConnectionStatus('disconnected');
+        } else if (elapsed > 15000) {
+          setIsConnected(false);
+          setConnectionStatus('disconnected');
+        } else if (elapsed > 7000) {
+          setIsConnected(false);
+          setConnectionStatus('reconnecting');
+        }
+      }
+    } finally {
+      isPollingSyncRef.current = false;
     }
-  }, [roomId, singerName, clientId, setMcSpeakingLock]);
+  }, [roomId, clientId, setMcSpeakingLock]);
+
+  const schedulePeerReconnect = useCallback(() => {
+    if (reconnectPeerTimerRef.current) clearTimeout(reconnectPeerTimerRef.current);
+    reconnectPeerTimerRef.current = setTimeout(() => {
+      connectToTvPeerRef.current();
+    }, 1500);
+  }, []);
 
   // PeerJS Client connection & auto-reconnect logic (Serverless direct TV-HP connections)
   const establishDataConnection = useCallback((peer: Peer, targetTvId: string) => {
+    if (dataConnRef.current && dataConnRef.current.open && dataConnRef.current.peer === targetTvId) {
+      return;
+    }
+    if (dataConnRef.current) {
+      try {
+        dataConnRef.current.close();
+      } catch {}
+    }
+
     setPeerConnectionState('connecting');
     const conn = peer.connect(targetTvId, { reliable: true });
     dataConnRef.current = conn;
 
     conn.on('open', () => {
-      console.log('[PeerJS HP] Connected to TV Master:', targetTvId);
       setPeerConnectionState('connected');
       setIsConnected(true);
+      setConnectionStatus('connected');
+      lastSyncTime.current = Date.now();
       // Handshake to TV
-      conn.send({ action: 'STATUS_UPDATE', senderName: singerName, senderId: peer.id });
-      showToast('🟢 Terhubung ke TV Master (P2P)!');
+      conn.send({ action: 'STATUS_UPDATE', senderName: singerNameRef.current, senderId: peer.id });
     });
 
     conn.on('data', (data: any) => {
+      lastSyncTime.current = Date.now();
+      if (data && data.action === 'PONG') {
+        setPeerConnectionState('connected');
+        setIsConnected(true);
+        return;
+      }
       if (data && data.action === 'STATUS_UPDATE') {
         if (data.song !== undefined) setCurrentSong(data.song);
         if (data.currentSinger !== undefined || data.payload?.currentSinger !== undefined) {
@@ -512,24 +608,19 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
     });
 
     conn.on('close', () => {
-      console.log('[PeerJS HP] Connection to TV closed');
-      setPeerConnectionState('disconnected');
-      schedulePeerReconnect();
+      if (dataConnRef.current === conn) {
+        setPeerConnectionState('disconnected');
+        schedulePeerReconnect();
+      }
     });
 
-    conn.on('error', (err) => {
-      console.warn('[PeerJS HP] Connection error:', err);
-      setPeerConnectionState('disconnected');
-      schedulePeerReconnect();
+    conn.on('error', () => {
+      if (dataConnRef.current === conn) {
+        setPeerConnectionState('disconnected');
+        schedulePeerReconnect();
+      }
     });
-  }, [singerName, showToast, setMcSpeakingLock]);
-
-  const schedulePeerReconnect = useCallback(() => {
-    if (reconnectPeerTimerRef.current) clearTimeout(reconnectPeerTimerRef.current);
-    reconnectPeerTimerRef.current = setTimeout(() => {
-      connectToTvPeer();
-    }, 3000);
-  }, []);
+  }, [setMcSpeakingLock, schedulePeerReconnect]);
 
   // Send action to TV via PeerJS DataConnection
   const sendPeerAction = useCallback((action: PeerAction, payload?: any): boolean => {
@@ -538,7 +629,7 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
         dataConnRef.current.send({
           action,
           payload,
-          senderName: singerName,
+          senderName: singerNameRef.current,
           senderId: peerRef.current?.id,
           timestamp: Date.now(),
         });
@@ -548,7 +639,7 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
       }
     }
     return false;
-  }, [singerName]);
+  }, []);
 
   const connectToTvPeer = useCallback(() => {
     if (reconnectPeerTimerRef.current) {
@@ -567,14 +658,12 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
         if (peerHeartbeatCleanRef.current) peerHeartbeatCleanRef.current();
         peerHeartbeatCleanRef.current = startPeerHeartbeat(clientPeer);
 
-        clientPeer.on('open', (id) => {
-          console.log('[PeerJS HP] Client peer registered:', id);
+        clientPeer.on('open', () => {
           establishDataConnection(clientPeer, tvPeerId);
         });
 
         // Reconnect immediately if connection to signaling broker is lost
         clientPeer.on('disconnected', () => {
-          console.log('[PeerJS HP] Sinyal terputus dari broker. Menyambung ulang...');
           if (clientPeer && !clientPeer.destroyed && clientPeer.disconnected) {
             try {
               clientPeer.reconnect();
@@ -594,7 +683,6 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
               } catch {}
             }
           }
-          console.warn('[PeerJS HP] Client peer error:', errMsg);
           setPeerConnectionState('disconnected');
           schedulePeerReconnect();
         });
@@ -607,31 +695,46 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
       } else if (peerRef.current.open) {
         establishDataConnection(peerRef.current, tvPeerId);
       }
-    } catch (err) {
-      console.warn('[PeerJS HP] Initialization error:', err);
+    } catch {
       setPeerConnectionState('disconnected');
       schedulePeerReconnect();
     }
   }, [roomId, establishDataConnection, schedulePeerReconnect]);
 
   useEffect(() => {
-    connectToTvPeer();
+    connectToTvPeerRef.current = connectToTvPeer;
+  }, [connectToTvPeer]);
+
+  // PeerJS lifecycle depends ONLY on [roomId] so profile/name edits never tear down WebRTC P2P
+  useEffect(() => {
+    connectToTvPeerRef.current();
+
+    const p2pKeepalive = setInterval(() => {
+      if (dataConnRef.current && dataConnRef.current.open) {
+        try {
+          dataConnRef.current.send({ action: 'PING', timestamp: Date.now() });
+        } catch {}
+      }
+    }, 15000);
 
     return () => {
+      clearInterval(p2pKeepalive);
       if (reconnectPeerTimerRef.current) clearTimeout(reconnectPeerTimerRef.current);
       if (peerHeartbeatCleanRef.current) peerHeartbeatCleanRef.current();
       if (dataConnRef.current) {
         try {
           dataConnRef.current.close();
         } catch {}
+        dataConnRef.current = null;
       }
       if (peerRef.current) {
         try {
           peerRef.current.destroy();
         } catch {}
+        peerRef.current = null;
       }
     };
-  }, [connectToTvPeer]);
+  }, [roomId]);
 
   // PeerJS WebRTC Microphone Streamer (Streams HP audio directly to TV)
   const startPeerMic = useCallback(async () => {
@@ -898,10 +1001,11 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
     let isUnmounted = false;
 
     let retryAttempt = 0;
+    let wsFailCount = 0;
     let pingInterval: any = null;
 
     const connectWebSocket = () => {
-      if (isUnmounted) return;
+      if (isUnmounted || isServerlessRef.current) return;
       if (reconnectTimeout) {
         clearTimeout(reconnectTimeout);
         reconnectTimeout = null;
@@ -911,7 +1015,7 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
         const wsUrl = getSignalingWebSocketUrl({
           roomId,
           role: 'client',
-          singerName,
+          singerName: singerNameRef.current,
           clientId,
         });
 
@@ -1134,17 +1238,30 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
             clearInterval(pingInterval);
             pingInterval = null;
           }
+          wsFailCount++;
+
+          const httpHealthy = Date.now() - lastHttpSyncAtRef.current < 12000;
+          if (wsFailCount >= 2 && httpHealthy) {
+            isServerlessRef.current = true;
+            setIsConnected(true);
+            setConnectionStatus('connected');
+            return;
+          }
+
           const isOffline = typeof navigator !== 'undefined' && navigator.onLine === false;
           if (isOffline) {
             setIsConnected(false);
             setConnectionStatus('disconnected');
-          } else if (Date.now() - lastSyncTime.current > 7000) {
+          } else if (!isServerlessRef.current && !httpHealthy && Date.now() - lastSyncTime.current > 7000) {
             setIsConnected(false);
             setConnectionStatus('reconnecting');
           }
-          retryAttempt++;
-          const delay = Math.min(1000 * Math.pow(1.5, retryAttempt), 15000);
-          reconnectTimeout = setTimeout(connectWebSocket, delay);
+
+          if (!isServerlessRef.current) {
+            retryAttempt++;
+            const delay = Math.min(1000 * Math.pow(1.5, retryAttempt), 15000);
+            reconnectTimeout = setTimeout(connectWebSocket, delay);
+          }
         };
 
         socket.onerror = () => {
@@ -1155,22 +1272,25 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
         };
       } catch (err) {
         setWsReadyState(WebSocket.CLOSED);
-        connectSSE();
+        if (!isServerlessRef.current) {
+          connectSSE();
+        }
       }
     };
 
     triggerReconnectRef.current = () => {
       retryAttempt = 0;
-      if (!socket || socket.readyState !== WebSocket.OPEN) {
+      if (!isServerlessRef.current && (!socket || socket.readyState !== WebSocket.OPEN)) {
         connectWebSocket();
       }
       fetchRoomState();
     };
 
     const connectSSE = () => {
+      if (isServerlessRef.current) return;
       try {
         const sseUrl = `/api/room/${encodeURIComponent(roomId)}/events?role=client&name=${encodeURIComponent(
-          singerName
+          singerNameRef.current
         )}`;
         sseSource = new EventSource(sseUrl);
 
@@ -1184,6 +1304,7 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
               if (typeof data.payload?.isMcSpeaking === 'boolean') setMcSpeakingLock(data.payload.isMcSpeaking);
               if (Array.isArray(data.payload?.queue)) setQueue(data.payload.queue);
               if (data.payload?.clientCount) setClientCount(data.payload.clientCount);
+              lastSyncTime.current = Date.now();
               setIsConnected(true);
               setConnectionStatus('connected');
             } else if (data.type === 'SYNC_QUEUE' && Array.isArray(data.payload?.queue)) {
@@ -1224,6 +1345,12 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
         };
 
         sseSource.onerror = () => {
+          if (isServerlessRef.current || Date.now() - lastHttpSyncAtRef.current < 10000) {
+            try {
+              sseSource?.close();
+            } catch {}
+            return;
+          }
           setIsConnected(false);
           setConnectionStatus('reconnecting');
         };
@@ -1235,8 +1362,11 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
     // Fast auto-reconnect on screen unlock, app switch, or connection return
     const handlePhoneWake = () => {
       retryAttempt = 0;
-      if (!socket || socket.readyState !== WebSocket.OPEN) {
+      if (!isServerlessRef.current && (!socket || socket.readyState !== WebSocket.OPEN)) {
         connectWebSocket();
+      }
+      if (!dataConnRef.current || !dataConnRef.current.open) {
+        connectToTvPeerRef.current();
       }
       fetchRoomState();
     };
@@ -1252,8 +1382,8 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
     window.addEventListener('focus', handlePhoneWake);
     window.addEventListener('pageshow', handlePhoneWake);
 
-    // Fast polling every 1.5s to guarantee 100% real-time synchronization between TV and HP
-    const pollInterval = setInterval(fetchRoomState, 1500);
+    // Fast polling every 1.2s to guarantee real-time synchronization on Vercel & Smart TV
+    const pollInterval = setInterval(fetchRoomState, 1200);
 
     return () => {
       isUnmounted = true;
@@ -1269,7 +1399,7 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
       if (socket) socket.close();
       if (sseSource) sseSource.close();
     };
-  }, [roomId, singerName, clientId, fetchRoomState, setMcSpeakingLock]);
+  }, [roomId, clientId, fetchRoomState, setMcSpeakingLock]);
 
   // Execute YouTube Search
   const executeSearch = useCallback(
@@ -1401,7 +1531,7 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
 
     let serverSyncOk = false;
 
-    const [roomSyncResult, roomQueueResult] = await Promise.allSettled([
+    const requests: Promise<Response>[] = [
       fetch('/api/room-sync', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1413,20 +1543,33 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
           priority,
           queueId: canonicalQueueId,
           requestId: canonicalQueueId,
+          clientId,
+          role: 'client',
         }),
       }),
-      fetch(`/api/room/${encodeURIComponent(roomId)}/queue`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ song, singerName, priority, queueId: canonicalQueueId }),
-      }),
-    ]);
+    ];
+
+    if (!isServerlessRef.current) {
+      requests.push(
+        fetch(`/api/room/${encodeURIComponent(roomId)}/queue`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ song, singerName, priority, queueId: canonicalQueueId }),
+        })
+      );
+    }
+
+    const [roomSyncResult, roomQueueResult] = await Promise.allSettled(requests);
 
     if (roomSyncResult.status === 'fulfilled' && roomSyncResult.value.ok) {
       try {
         const syncData = await roomSyncResult.value.json();
         if (syncData?.success) {
           serverSyncOk = true;
+          lastHttpSyncAtRef.current = Date.now();
+          lastSyncTime.current = Date.now();
+          setIsConnected(true);
+          setConnectionStatus('connected');
           if (syncData.room?.nowPlaying) setCurrentSong(syncData.room.nowPlaying);
           if (syncData.room?.currentSinger !== undefined) setCurrentSinger(syncData.room.currentSinger);
           if (Array.isArray(syncData.room?.queue)) setQueue(syncData.room.queue);
@@ -1434,11 +1577,15 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
       } catch {}
     }
 
-    if (roomQueueResult.status === 'fulfilled' && roomQueueResult.value.ok) {
+    if (roomQueueResult && roomQueueResult.status === 'fulfilled' && roomQueueResult.value.ok) {
       try {
         const data = await roomQueueResult.value.json();
         if (data?.success) {
           serverSyncOk = true;
+          lastHttpSyncAtRef.current = Date.now();
+          lastSyncTime.current = Date.now();
+          setIsConnected(true);
+          setConnectionStatus('connected');
           if (data.currentSong) setCurrentSong(data.currentSong);
           if (data.currentSinger !== undefined) setCurrentSinger(data.currentSinger);
           if (Array.isArray(data.queue)) {
@@ -1470,23 +1617,39 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
     const wsOk = sendWsReliable('PLAY_NOW', { song, singerName });
 
     let serverOk = false;
-    const [syncRes, directRes] = await Promise.allSettled([
+    const requests: Promise<Response>[] = [
       fetch('/api/room-sync', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ roomId, action: 'PLAY_NOW', song, singerName }),
+        body: JSON.stringify({
+          roomId,
+          action: 'PLAY_NOW',
+          song,
+          singerName,
+          clientId,
+          role: 'client',
+        }),
       }),
-      fetch(`/api/room/${encodeURIComponent(roomId)}/play-now`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ song, singerName }),
-      }),
-    ]);
+    ];
+    if (!isServerlessRef.current) {
+      requests.push(
+        fetch(`/api/room/${encodeURIComponent(roomId)}/play-now`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ song, singerName }),
+        })
+      );
+    }
+    const [syncRes, directRes] = await Promise.allSettled(requests);
 
     if (syncRes.status === 'fulfilled' && syncRes.value.ok) serverOk = true;
-    if (directRes.status === 'fulfilled' && directRes.value.ok) serverOk = true;
+    if (directRes && directRes.status === 'fulfilled' && directRes.value.ok) serverOk = true;
 
     if (serverOk) {
+      lastHttpSyncAtRef.current = Date.now();
+      lastSyncTime.current = Date.now();
+      setIsConnected(true);
+      setConnectionStatus('connected');
       fetchRoomState();
     }
 
@@ -1525,24 +1688,37 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
     sendWsReliable('SKIP_NEXT', { senderName: singerName, nextSong: nextSongItem, queueId: nextQueueId });
 
     try {
-      const [syncRes, skipRes] = await Promise.allSettled([
+      const requests: Promise<Response>[] = [
         fetch('/api/room-sync', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ roomId, action: 'SKIP_NEXT', singerName, consumedQueueId: nextQueueId }),
+          body: JSON.stringify({
+            roomId,
+            action: 'SKIP_NEXT',
+            singerName,
+            consumedQueueId: nextQueueId,
+            clientId,
+            role: 'client',
+          }),
         }),
-        fetch(`/api/room/${encodeURIComponent(roomId)}/skip`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ singerName, nextSong: nextSongItem, queueId: nextQueueId }),
-        }),
-      ]);
-      if (skipRes.status === 'fulfilled' && skipRes.value.ok) {
+      ];
+      if (!isServerlessRef.current) {
+        requests.push(
+          fetch(`/api/room/${encodeURIComponent(roomId)}/skip`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ singerName, nextSong: nextSongItem, queueId: nextQueueId }),
+          })
+        );
+      }
+      const [syncRes, skipRes] = await Promise.allSettled(requests);
+      if (skipRes && skipRes.status === 'fulfilled' && skipRes.value.ok) {
         const data = await skipRes.value.json();
         if (Array.isArray(data.queue)) {
           setQueue(data.queue);
         }
       } else if (syncRes.status === 'fulfilled' && syncRes.value.ok) {
+        lastHttpSyncAtRef.current = Date.now();
         const data = await syncRes.value.json();
         if (Array.isArray(data.room?.queue)) {
           setQueue(data.room.queue);
@@ -1562,11 +1738,31 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
     sendWsReliable('TOGGLE_PAUSE', { isPlaying: nextState, senderName: singerName });
 
     try {
-      await fetch(`/api/room/${encodeURIComponent(roomId)}/toggle-pause`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ isPlaying: nextState, senderName: singerName }),
-      });
+      const requests: Promise<Response>[] = [
+        fetch('/api/room-sync', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            roomId,
+            action: 'TOGGLE_PAUSE',
+            isPlaying: nextState,
+            singerName,
+            clientId,
+            role: 'client',
+          }),
+        }),
+      ];
+      if (!isServerlessRef.current) {
+        requests.push(
+          fetch(`/api/room/${encodeURIComponent(roomId)}/toggle-pause`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ isPlaying: nextState, senderName: singerName }),
+          })
+        );
+      }
+      await Promise.allSettled(requests);
+      lastHttpSyncAtRef.current = Date.now();
       fetchRoomState();
     } catch (e) {}
     showToast(nextState ? '▶️ Melanjutkan TV' : '⏸️ Menjeda TV');
@@ -1579,7 +1775,7 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
       const jName = (singerName || 'Prajurit (HP)').trim();
 
       // 1. PeerJS Direct Connection
-      sendPeerAction('SUBMIT_JURY_SCORE' as any, {
+      sendPeerAction('SUBMIT_JURY_SCORE', {
         score: finalVal,
         juryName: jName,
         songId: currentSong?.id,
@@ -1593,22 +1789,48 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
         clientId,
       });
 
-      // 3. HTTP Fallback Endpoint
+      // 3. Vercel /api/room-sync & Express Fallback
       try {
-        const res = await fetch(`/api/room/${encodeURIComponent(roomId)}/jury-vote`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            score: finalVal,
-            juryName: jName,
-            songId: currentSong?.id,
-            clientId: jName.toLowerCase() || clientId,
+        const requests: Promise<Response>[] = [
+          fetch('/api/room-sync', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              roomId,
+              action: 'SUBMIT_JURY_SCORE',
+              score: finalVal,
+              juryName: jName,
+              songId: currentSong?.id,
+              clientId: jName.toLowerCase() || clientId,
+              role: 'client',
+            }),
           }),
-        });
-        if (res.ok) {
-          const data = await res.json();
+        ];
+        if (!isServerlessRef.current) {
+          requests.push(
+            fetch(`/api/room/${encodeURIComponent(roomId)}/jury-vote`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                score: finalVal,
+                juryName: jName,
+                songId: currentSong?.id,
+                clientId: jName.toLowerCase() || clientId,
+              }),
+            })
+          );
+        }
+        const [syncRes, voteRes] = await Promise.allSettled(requests);
+        if (voteRes && voteRes.status === 'fulfilled' && voteRes.value.ok) {
+          const data = await voteRes.value.json();
           if (Array.isArray(data.votes)) {
             setJuryVotersList(data.votes.map((v: any) => ({ juryName: v.juryName, score: v.score })));
+          }
+        } else if (syncRes.status === 'fulfilled' && syncRes.value.ok) {
+          lastHttpSyncAtRef.current = Date.now();
+          const data = await syncRes.value.json();
+          if (Array.isArray(data.room?.juryVotes)) {
+            setJuryVotersList(data.room.juryVotes.map((v: any) => ({ juryName: v.juryName, score: v.score })));
           }
         }
       } catch {}
@@ -1637,23 +1859,48 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
     setQueue(newQueue);
 
     sendPeerAction('REORDER_QUEUE', { fromIndex, toIndex, queueId: moved.queueId });
-    const sentWs = sendWsReliable('MOVE_QUEUE_ITEM', { fromIndex, toIndex, queueId: moved.queueId, senderName: singerName });
+    sendWsReliable('MOVE_QUEUE_ITEM', { fromIndex, toIndex, queueId: moved.queueId, senderName: singerName });
 
-    if (!sentWs) {
-      try {
-        const res = await fetch(`/api/room/${encodeURIComponent(roomId)}/reorder`, {
+    try {
+      const requests: Promise<Response>[] = [
+        fetch('/api/room-sync', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ fromIndex, toIndex, queueId: moved.queueId, singerName }),
-        });
-        if (res.ok) {
-          const data = await res.json();
-          if (Array.isArray(data.queue)) {
-            setQueue(data.queue);
-          }
+          body: JSON.stringify({
+            roomId,
+            action: 'REORDER_QUEUE',
+            fromIndex,
+            toIndex,
+            queueId: moved.queueId,
+            singerName,
+            clientId,
+            role: 'client',
+          }),
+        }),
+      ];
+      if (!isServerlessRef.current) {
+        requests.push(
+          fetch(`/api/room/${encodeURIComponent(roomId)}/reorder`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ fromIndex, toIndex, queueId: moved.queueId, singerName }),
+          })
+        );
+      }
+      const [syncRes, reorderRes] = await Promise.allSettled(requests);
+      if (reorderRes && reorderRes.status === 'fulfilled' && reorderRes.value.ok) {
+        const data = await reorderRes.value.json();
+        if (Array.isArray(data.queue)) {
+          setQueue(data.queue);
         }
-      } catch (e) {}
-    }
+      } else if (syncRes.status === 'fulfilled' && syncRes.value.ok) {
+        lastHttpSyncAtRef.current = Date.now();
+        const data = await syncRes.value.json();
+        if (Array.isArray(data.room?.queue)) {
+          setQueue(data.room.queue);
+        }
+      }
+    } catch (e) {}
     showToast(`↔️ Urutan lagu digeser ke #${toIndex + 1}`);
   };
 
@@ -1665,24 +1912,37 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
     sendWsReliable('REMOVE_QUEUE_ITEM', { queueId });
 
     try {
-      const [syncRes, removeRes] = await Promise.allSettled([
+      const requests: Promise<Response>[] = [
         fetch('/api/room-sync', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ roomId, action: 'REMOVE_QUEUE', queueId }),
+          body: JSON.stringify({
+            roomId,
+            action: 'REMOVE_QUEUE',
+            queueId,
+            singerName,
+            clientId,
+            role: 'client',
+          }),
         }),
-        fetch(`/api/room/${encodeURIComponent(roomId)}/remove`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ queueId }),
-        }),
-      ]);
-      if (removeRes.status === 'fulfilled' && removeRes.value.ok) {
+      ];
+      if (!isServerlessRef.current) {
+        requests.push(
+          fetch(`/api/room/${encodeURIComponent(roomId)}/remove`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ queueId }),
+          })
+        );
+      }
+      const [syncRes, removeRes] = await Promise.allSettled(requests);
+      if (removeRes && removeRes.status === 'fulfilled' && removeRes.value.ok) {
         const data = await removeRes.value.json();
         if (Array.isArray(data.queue)) {
           setQueue(data.queue);
         }
       } else if (syncRes.status === 'fulfilled' && syncRes.value.ok) {
+        lastHttpSyncAtRef.current = Date.now();
         const data = await syncRes.value.json();
         if (Array.isArray(data.room?.queue)) {
           setQueue(data.room.queue);
@@ -1701,17 +1961,35 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
     }
 
     sendPeerAction('PLAY_SOUND_FX', { sound, senderName: singerName });
-    const sentWs = sendWsReliable('PLAY_SOUND_FX', { sound, senderName: singerName });
+    sendWsReliable('PLAY_SOUND_FX', { sound, senderName: singerName });
 
-    if (!sentWs) {
-      try {
-        await fetch(`/api/room/${encodeURIComponent(roomId)}/reaction`, {
+    try {
+      const requests: Promise<Response>[] = [
+        fetch('/api/room-sync', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ sound, singerName }),
-        });
-      } catch (err) {}
-    }
+          body: JSON.stringify({
+            roomId,
+            action: 'PLAY_SOUND_FX',
+            sound,
+            singerName,
+            clientId,
+            role: 'client',
+          }),
+        }),
+      ];
+      if (!isServerlessRef.current) {
+        requests.push(
+          fetch(`/api/room/${encodeURIComponent(roomId)}/reaction`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ sound, singerName }),
+          })
+        );
+      }
+      await Promise.allSettled(requests);
+      lastHttpSyncAtRef.current = Date.now();
+    } catch (err) {}
 
     showToast(`${emoji} ${name} terkirim ke Layar TV!`);
   };
@@ -1773,7 +2051,7 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
 
     // 3. HTTP /api/room-sync & /api/room/:id/smart-mc
     let serverOk = false;
-    const [syncRes, smartMcRes] = await Promise.allSettled([
+    const requests: Promise<Response>[] = [
       fetch('/api/room-sync', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1783,18 +2061,29 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
           announcement,
           singerName: vocalistName,
           payload,
+          clientId,
+          role: 'client',
         }),
       }),
-      fetch(`/api/room/${encodeURIComponent(roomId)}/smart-mc`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      }),
-    ]);
+    ];
+    if (!isServerlessRef.current) {
+      requests.push(
+        fetch(`/api/room/${encodeURIComponent(roomId)}/smart-mc`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        })
+      );
+    }
+    const [syncRes, smartMcRes] = await Promise.allSettled(requests);
 
-    if (syncRes.status === 'fulfilled' && syncRes.value.ok) serverOk = true;
-    if (smartMcRes.status === 'fulfilled' && smartMcRes.value.ok) {
+    if (syncRes.status === 'fulfilled' && syncRes.value.ok) {
       serverOk = true;
+      lastHttpSyncAtRef.current = Date.now();
+    }
+    if (smartMcRes && smartMcRes.status === 'fulfilled' && smartMcRes.value.ok) {
+      serverOk = true;
+      lastHttpSyncAtRef.current = Date.now();
       try {
         const data = await smartMcRes.value.json();
         if (data.skipped === 'mc_busy') {
@@ -1853,7 +2142,11 @@ export const MobileClientView: React.FC<MobileClientViewProps> = ({
   const effectiveConnectionStatus: ConnectionStatus =
     typeof navigator !== 'undefined' && navigator.onLine === false
       ? 'disconnected'
-      : isEmbedded || isConnected || wsReadyState === WebSocket.OPEN || peerConnectionState === 'connected'
+      : isEmbedded ||
+        isConnected ||
+        wsReadyState === WebSocket.OPEN ||
+        peerConnectionState === 'connected' ||
+        Date.now() - lastHttpSyncAtRef.current < 10000
       ? 'connected'
       : connectionStatus === 'disconnected' && peerConnectionState === 'disconnected'
       ? 'disconnected'
