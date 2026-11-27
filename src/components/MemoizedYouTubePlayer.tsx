@@ -40,7 +40,7 @@ const TvYouTubeEmbedComponent: React.FC<MemoizedTvYouTubeEmbedProps> = ({
   const videoOrigin = typeof window !== 'undefined' ? window.location.origin : '';
   // Parameter YouTube embed ringan tanpa memaksa vq=hd720 agar Adaptive Bitrate menyesuaikan bandwidth tanpa lag
   const iframeSrc = videoId
-    ? `https://www.youtube.com/embed/${videoId}?autoplay=1&enablejsapi=1&rel=0&iv_load_policy=3&playsinline=1&controls=0&modestbranding=1&origin=${encodeURIComponent(
+    ? `https://www.youtube.com/embed/${videoId}?autoplay=1&enablejsapi=1&rel=0&iv_load_policy=3&cc_load_policy=0&playsinline=1&controls=0&modestbranding=1&origin=${encodeURIComponent(
         videoOrigin
       )}`
     : '';

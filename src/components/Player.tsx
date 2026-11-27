@@ -97,6 +97,7 @@ export const Player: React.FC = () => {
           fs: 1,
           playsinline: 1,
           enablejsapi: 1,
+          cc_load_policy: 0,
           iv_load_policy: 3,
           wmode: 'opaque',
           origin: window.location.origin,
@@ -107,6 +108,10 @@ export const Player: React.FC = () => {
             playerRef.current = event.target;
             internalPlayerRef.current = event.target;
             try {
+              if (event.target && typeof event.target.unloadModule === 'function') {
+                event.target.unloadModule('captions');
+                event.target.unloadModule('cc');
+              }
               if (isMuted) {
                 event.target.mute();
               } else {
@@ -118,6 +123,12 @@ export const Player: React.FC = () => {
             } catch {}
           },
           onStateChange: (event: any) => {
+            try {
+              if (event.target && typeof event.target.unloadModule === 'function') {
+                event.target.unloadModule('captions');
+                event.target.unloadModule('cc');
+              }
+            } catch {}
             if (event.data === 0) {
               handlePlayerEnded();
             } else if (event.data === 1) {
