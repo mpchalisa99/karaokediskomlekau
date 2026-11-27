@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import confetti from 'canvas-confetti';
-import { Song, QueueItem, SuffixFilter, WebSocketMessage, RemoteClientInfo, RemoteNotification, SongScoreData, ScreenReaction, SoundFxType, JuryVote, JuryScoreSummary, getScoreQuote, SmartMcAnnouncement, SmartMcTier, ConnectionStatus } from '../types/karaoke';
+import { Song, QueueItem, SuffixFilter, WebSocketMessage, RemoteClientInfo, RemoteNotification, SongScoreData, ScreenReaction, SoundFxType, JuryVote, JuryScoreSummary, getScoreQuote, SmartMcAnnouncement, SmartMcTier, McUniformType, ConnectionStatus } from '../types/karaoke';
 import { searchKaraokeSongs, CURATED_LIBRARY, CATEGORY_PRESETS, extractYoutubeVideoId, fetchOEmbedInfo, getHitsIndonesiaSongs, getHitsIndonesiaLastUpdated, refreshIndonesianTrendingHits } from '../services/youtube';
 import { audioFx } from '../services/audioFx';
 import {
@@ -279,6 +279,7 @@ export const KaraokeProvider: React.FC<{ children: React.ReactNode; initialIsTvM
   const isPlayingRef = useRef<boolean>(false);
   const isMcSpeakingRef = useRef<boolean>(false);
   const processedMcIdsRef = useRef<Set<string>>(new Set());
+  const lastMcUniformRef = useRef<McUniformType>('loreng');
   const mcDismissTimerRef = useRef<any>(null);
   const mcAudioEndWaitTimerRef = useRef<any>(null);
   const endTransitionTimerRef = useRef<any>(null);
@@ -2807,6 +2808,9 @@ export const KaraokeProvider: React.FC<{ children: React.ReactNode; initialIsTvM
 
       const resolvedSinger = options?.singerName || currentSingerNameRef.current || defaultSingerName;
 
+      const nextUniform: McUniformType = lastMcUniformRef.current === 'biru' ? 'loreng' : 'biru';
+      lastMcUniformRef.current = nextUniform;
+
       const baseAnnouncement =
         options?.announcement ||
         generateSmartMcAnnouncement({
@@ -2814,6 +2818,7 @@ export const KaraokeProvider: React.FC<{ children: React.ReactNode; initialIsTvM
           songTitle: options?.songTitle || currentSong?.title || 'Lagu Pilihan Prajurit',
           score: effectiveScore,
           forceTier: options?.forceTier,
+          mcUniform: nextUniform,
           triggeredBy: options?.triggeredBy || (isManualTrigger ? 'Pantun MC (HP)' : 'Awal Lagu'),
           isManual: isManualTrigger,
           nextSongTitle: options?.nextSongTitle,
@@ -2821,6 +2826,7 @@ export const KaraokeProvider: React.FC<{ children: React.ReactNode; initialIsTvM
 
       const announcement: SmartMcAnnouncement = {
         ...baseAnnouncement,
+        mcUniform: nextUniform,
         isManual: isManualTrigger,
         nextSongTitle: options?.nextSongTitle ?? baseAnnouncement.nextSongTitle,
       };

@@ -1,4 +1,4 @@
-import { SmartMcAnnouncement, SmartMcTier } from '../types/karaoke';
+import { McUniformType, SmartMcAnnouncement, SmartMcTier } from '../types/karaoke';
 import { audioFx } from './audioFx';
 
 interface PantunTemplate {
@@ -17,492 +17,659 @@ interface PantunTemplate {
  */
 export const SMART_MC_TEMPLATES: PantunTemplate[] = [
   // ============================================================================
-  // KATEGORI 1: NILAI RENDAH (< 60) - LUCU, KOMANDO, PANTANG MUNDUR WALAU HANCUR
+  // KATEGORI 1: NILAI RENDAH (< 60) - SUPER PENDEK, KOCAK, PANTANG MUNDUR
   // ============================================================================
   {
     id: 'low-1',
     tier: 'low',
-    badge: 'FREKUENSI MELENCENG // NILAI < 60',
+    badge: 'RADAR JAMMING // NILAI < 60',
     pantunLines: [
-      'Pasang antena di atas menara,',
-      'Sinyal terputus terkena badai.',
-      '{singer} bernyanyi penuh gelora,',
-      'Walau nadanya lari ke pantai!',
+      'Layar radar berkedip hijau,',
+      'Sinyal masuk dari angkasa.',
+      'Walau suara agak kacau,',
+      '{singer} tetap juara!',
     ],
     commentaryTemplate:
-      'Laporan Puskodal Diskomlekau! Lagu "{song}" dibawakan oleh {singer} dengan skor {score}. Meskipun radar nada sempat jamming, semangat tempur prajurit tetap pantang mundur walau suara hancur!',
+      'Laporan Puskodal Diskomlekau! Lagu "{song}" selesai oleh {singer} dengan skor {score}. Pantang mundur walau suara hancur!',
   },
   {
     id: 'low-2',
     tier: 'low',
-    badge: 'RADAR VOKAL JAMMING // NILAI < 60',
+    badge: 'PANTANG MUNDUR // NILAI < 60',
     pantunLines: [
-      'Kapal selam menyelam di lautan,',
-      'Pesawat tempur terbang ke awan.',
-      'Musik mengarah ke arah selatan,',
-      'Suara {singer} belok ke kanan!',
+      'Rudal siap di peluncur,',
+      'Target terkunci tepat sasaran.',
+      'Pantang mundur walau hancur,',
+      'Nada meleset tetap bertahan!',
     ],
     commentaryTemplate:
-      'Perhatian seluruh jajaran Korps Elektronika! Skor Dewan Juri menunjukkan angka {score} untuk {singer} pada lagu "{song}". Mikrofon sempat minta izin pensiun dini, tapi keberaniannya patut diberi hormat!',
+      'Skor {score} untuk {singer} di lagu "{song}". Mikrofon sempat siaga satu, tapi mental juara tetap kokoh!',
   },
   {
     id: 'low-3',
     tier: 'low',
-    badge: 'PANTANG MUNDUR // NILAI < 60',
+    badge: 'MENTAL PAHLAWAN // NILAI < 60',
     pantunLines: [
-      'Solder komponen di meja kerja,',
-      'Kabel tersambung lampu menyala.',
-      'Skor {score} janganlah berkecil dada,',
-      'Yang penting {singer} tampil menggila!',
+      'Pesawat tempur terbang rendah,',
+      'Manuver tajam membelah awan.',
+      'Suara fals bukan masalah,',
+      'Yang penting mental pahlawan!',
     ],
     commentaryTemplate:
-      'Luar biasa jiwa korsa {singer}! Menyanyikan "{song}" dengan nilai {score}. Di Diskomlekau tidak ada kata menyerah, nada meleset anggap saja manuver penghindaran radar musuh!',
+      'Luar biasa jiwa korsa {singer}! Skor {score} di lagu "{song}", fals dikit anggap manuver hindari radar!',
   },
   {
     id: 'low-4',
     tier: 'low',
-    badge: 'KALIBRASI DARURAT // NILAI < 60',
+    badge: 'SIAGA KALIBRASI // NILAI < 60',
     pantunLines: [
-      'Cek frekuensi pakai osiloskop,',
-      'Gelombang naik turun tak tentu.',
-      '{singer} nyanyi mirip suara helikopter,',
-      'Untung dewan juri masih kasih {score}!',
+      'Radar Thomson berputar terang,',
+      'Pantau langit siang malam.',
+      'Walau nada meleset terbang,',
+      '{singer} tampil tetap tenang!',
     ],
     commentaryTemplate:
-      'Hasil telemetri vokal untuk {singer} di lagu "{song}" tercatat {score} poin! Segera lapor ke bengkel Avionik dan Elektronika untuk kalibrasi pita suara sebelum lagu berikutnya!',
+      'Nilai {score} untuk {singer} pada lagu "{song}"! Segera lapor bengkel avionik untuk kalibrasi pita suara!',
   },
   {
     id: 'low-5',
     tier: 'low',
-    badge: 'OVERLOAD TRANSMITTER // NILAI < 60',
+    badge: 'TEMPO KILAT // NILAI < 60',
     pantunLines: [
-      'Beli baterai di pasar minggu,',
-      'Dipakai untuk radio komunikasi.',
-      'Lagu "{song}" terdengar haru,',
-      'Tetangga panik kirain sirene evakuasi!',
+      'Rudal melesat secepat kilat,',
+      'Asap putih tinggalkan jejak.',
+      'Tempo lagu agak terlambat,',
+      '{singer} gaspol terus menanjak!',
     ],
     commentaryTemplate:
-      'Skor akhir {score} untuk komandan vokal kita {singer}! Walaupun pitch control sedang gangguan atmosfer, gaya panggungnya tetap bintang lima TNI Angkatan Udara!',
+      'Skor {score} berhasil diamankan {singer} lewat "{song}". Semangat tempurnya bintang lima!',
   },
   {
     id: 'low-6',
     tier: 'low',
-    badge: 'MENTAL BAJA // NILAI < 60',
+    badge: 'LAGU BARU // NILAI < 60',
     pantunLines: [
-      'Radar berputar mencari sasaran,',
-      'Sasaran terkunci di ujung barat.',
-      'Suara {singer} memang penuh kejutan,',
-      'Skor {score} tetap disambut hangat!',
+      'Pesawat angkut mendarat mulus,',
+      'Bawa logistik tepat waktu.',
+      'Niat {singer} sudah tulus,',
+      'Fals dikit anggap lagu baru!',
     ],
     commentaryTemplate:
-      'Salut untuk {singer} yang baru saja menuntaskan operasi lagu "{song}" dengan nilai {score}! Semboyan kita jelas: Suara fals itu seni, yang penting mental baja Korps Elektronika!',
-  },
-  {
-    id: 'low-7',
-    tier: 'low',
-    badge: 'MIC MINTA RESIGN // NILAI < 60',
-    pantunLines: [
-      'Terbang tinggi pesawat Sukhoi,',
-      'Melintas cepat di atas landasan.',
-      '{singer} tarik nada tinggi aduhai,',
-      'Speaker TV langsung minta ampunan!',
-    ],
-    commentaryTemplate:
-      'Dewan Juri Prajurit memberikan nilai rata-rata {score} untuk {singer} pada lagu "{song}". Jangan lupa minum air hangat agar transistor tenggorokan kembali stabil!',
-  },
-  {
-    id: 'low-8',
-    tier: 'low',
-    badge: 'SINYAL KRESEK-KRESEK // NILAI < 60',
-    pantunLines: [
-      'Pagi-pagi apel di lapangan,',
-      'Siang hari merakit pemancar.',
-      'Walau "{song}" penuh rintangan,',
-      '{singer} tetap bernyanyi dengan tegar!',
-    ],
-    commentaryTemplate:
-      'Nilai {score} berhasil diamankan oleh {singer}! Sebuah penampilan yang menguji ketahanan mental dan gendang telinga seluruh prajurit di ruangan ini. Komando!',
-  },
-  {
-    id: 'low-9',
-    tier: 'low',
-    badge: 'SIAGA DAMKAR VOKAL // NILAI < 60',
-    pantunLines: [
-      'Kabel serat optik panjang membentang,',
-      'Menghubungkan markas sampai ke pangkalan.',
-      '{singer} bernyanyi sangatlah lantang,',
-      'Sayang nadanya lupa dibawa sekalian!',
-    ],
-    commentaryTemplate:
-      'Lagu "{song}" selesai dieksekusi oleh {singer} dengan skor {score}! Mari kita beri tepuk tangan paling meriah untuk keberanian tanpa batas ini!',
-  },
-  {
-    id: 'low-10',
-    tier: 'low',
-    badge: 'WAJIB TUNE-UP VOKAL // NILAI < 60',
-    pantunLines: [
-      'Naik Hercules membawa logistik,',
-      'Mendarat mulus di pagi hari.',
-      'Gaya {singer} sudah sangat asyik,',
-      'Walau skor {score} bikin juri senyum sendiri!',
-    ],
-    commentaryTemplate:
-      'Terima kasih {singer} atas hiburan spektakuler di lagu "{song}"! Dengan nilai {score}, Anda resmi dinobatkan sebagai Duta Pantang Mundur Diskomlekau!',
+      'Terima kasih {singer} untuk aksi "{song}" dengan nilai {score}. Duta Pantang Mundur Diskomlekau!',
   },
 
   // ============================================================================
-  // KATEGORI 2: NILAI SEDANG (60 - 80) - MANTAP, STABIL, LOLOS AUDISI SKUADRON
+  // KATEGORI 2: NILAI SEDANG (60 - 80) - SUPER PENDEK, STABIL, MANTAP
   // ============================================================================
   {
     id: 'med-1',
     tier: 'medium',
-    badge: 'FREKUENSI STABIL // NILAI 60 - 80',
+    badge: 'FREKUENSI JERNIH // NILAI 60 - 80',
     pantunLines: [
-      'Satelit mengorbit di angkasa raya,',
-      'Memancarkan data ke seluruh negeri.',
-      '{singer} bernyanyi penuh percaya,',
-      'Skor {score} mantap menghibur hati!',
+      'Antena komlek berdiri tegak,',
+      'Frekuensi jernih tanpa gangguan.',
+      'Suara {singer} mantap bergerak,',
+      'Skor {score} jadi kebanggaan!',
     ],
     commentaryTemplate:
-      'Frekuensi terkunci cukup rapi! {singer} membawakan lagu "{song}" dan meraih nilai rata-rata {score} dari Dewan Juri. Sedikit lagi masuk kualifikasi penyanyi utama Mabesau!',
+      'Frekuensi terkunci rapi! {singer} membawakan "{song}" dan meraih nilai {score} dari Dewan Juri!',
   },
   {
     id: 'med-2',
     tier: 'medium',
-    badge: 'LOLOS AUDISI SKUADRON // NILAI 60 - 80',
+    badge: 'GAYA BERKELAS // NILAI 60 - 80',
     pantunLines: [
-      'Prajurit komlek menjaga radar,',
-      'Pantau udara siang dan malam.',
-      'Suara {singer} terdengar menggelegar,',
-      'Lagu "{song}" sukses bikin tentram!',
+      'F-16 lepas landas pagi,',
+      'Suara mesin menggelegar keras.',
+      '{singer} tampil penuh energi,',
+      'Skor {score} gaya berkelas!',
     ],
     commentaryTemplate:
-      'Penampilan yang solid dari {singer}! Skor {score} pada lagu "{song}" membuktikan modulasi suara sudah terkalibrasi baik, tinggal tambah daya dorong afterburner!',
+      'Penampilan solid dari {singer}! Skor {score} di lagu "{song}" bikin ruangan makin hangat!',
   },
   {
     id: 'med-3',
     tier: 'medium',
-    badge: 'TRANSMISI JERNIH // NILAI 60 - 80',
+    badge: 'DRONE PANTAU // NILAI 60 - 80',
     pantunLines: [
-      'Dari Halim menuju Lanud Iswahjudi,',
-      'Terbang formasi menembus awan.',
-      '{singer} tampil gagah berani,',
+      'Drone quadcopter terbang melayang,',
+      'Kamera fokus pantau lapangan.',
+      '{singer} paling disayang,',
       'Nilai {score} resmi di tangan!',
     ],
     commentaryTemplate:
-      'Dewan Juri Prajurit mencatat skor {score} untuk {singer} lewat tembang "{song}". Nafas cukup panjang walau di tikungan refrein sempat ngos-ngosan sedikit!',
+      'Dewan Juri mencatat skor {score} untuk {singer} pada lagu "{song}". Mantap komando!',
   },
   {
     id: 'med-4',
     tier: 'medium',
-    badge: 'PERTAHANAN NADA KUAT // NILAI 60 - 80',
+    badge: 'RADAR BERSIH // NILAI 60 - 80',
     pantunLines: [
-      'Merakit sirkuit di ruang teknisi,',
-      'Pasang resistor beserta dioda.',
-      '{singer} sudah lolos audisi,',
-      'Skor {score} siap naik panggung utama!',
+      'Sinyal radar bersih sekali,',
+      'Tak ada gangguan di monitor.',
+      '{singer} nyanyi memikat hati,',
+      'Skor {score} makin gacor!',
     ],
     commentaryTemplate:
-      'Lagu "{song}" berhasil diselesaikan dengan apik oleh {singer} dengan perolehan nilai {score}. Sinyal audio stabil, siap lanjut ke misi lagu berikutnya!',
+      'Monitor utama menampilkan skor {score} untuk {singer} di lagu "{song}". Siap lanjut lagu berikutnya!',
   },
   {
     id: 'med-5',
     tier: 'medium',
-    badge: 'MANUVER VOKAL TAKTIS // NILAI 60 - 80',
+    badge: 'STANDAR KOMANDAN // NILAI 60 - 80',
     pantunLines: [
-      'Pesawat F-16 bermanuver indah,',
-      'Kembali mendarat di waktu senja.',
-      'Suara {singer} merdu dan gagah,',
-      'Nilai {score} dari juri untuk Anda!',
+      'Radio taktis ganti frekuensi,',
+      'Laporan masuk dari pos depan.',
+      '{singer} tampil penuh aksi,',
+      'Skor {score} standar komandan!',
     ],
     commentaryTemplate:
-      'Kerja bagus {singer}! Membawakan "{song}" dengan skor {score}. Dewan Juri menilai cengkok vokalnya sudah setara pemancar gelombang mikro berdaya menengah!',
+      'Kerja bagus {singer}! Membawakan "{song}" dengan nilai {score} tanpa interferensi!',
   },
   {
     id: 'med-6',
     tier: 'medium',
-    badge: 'GELOMBANG HARMONIS // NILAI 60 - 80',
+    badge: 'RUDAL HANUD // NILAI 60 - 80',
     pantunLines: [
-      'Bunga melati tumbuh di taman,',
-      'Harum semerbak di pagi buta.',
-      '{singer} nyanyi penuh penghayatan,',
-      'Lagu "{song}" dapat nilai {score} sempurna!',
+      'Rudal hanud tegak siaga,',
+      'Jaga langit ibu pertiwi.',
+      'Skor {score} bikin bangga,',
+      '{singer} sukses menghibur kami!',
     ],
     commentaryTemplate:
-      'Skor {score} diraih oleh {singer} pada lagu "{song}"! Sebuah pencapaian taktis yang membanggakan keluarga besar Diskomlekau!',
-  },
-  {
-    id: 'med-7',
-    tier: 'medium',
-    badge: 'SASARAN TERKUNCI // NILAI 60 - 80',
-    pantunLines: [
-      'Antena parabola menghadap langit,',
-      'Menangkap sinyal dari angkasa.',
-      'Walau nada tinggi agak sedikit sulit,',
-      '{singer} berhasil raih skor {score} luar biasa!',
-    ],
-    commentaryTemplate:
-      'Mantap komando! {singer} menaklukkan lagu "{song}" dengan nilai {score}. Latihan rutin di kamar mandi terbukti membuahkan hasil positif di panggung!',
-  },
-  {
-    id: 'med-8',
-    tier: 'medium',
-    badge: 'BINTANG PANGGUNG KOMLEK // NILAI 60 - 80',
-    pantunLines: [
-      'Minum kopi hangat bersama kawan,',
-      'Sambil berjaga di pos komunikasi.',
-      'Penampilan {singer} sungguh menawan,',
-      'Skor {score} patut kita apresiasi!',
-    ],
-    commentaryTemplate:
-      'Tepuk tangan untuk {singer}! Lagu "{song}" ditutup dengan nilai rata-rata {score}. Siap-siap vokalis berikutnya jangan mau kalah!',
-  },
-  {
-    id: 'med-9',
-    tier: 'medium',
-    badge: 'AUDIO TERKALIBRASI // NILAI 60 - 80',
-    pantunLines: [
-      'Kirim berita lewat sandi morse,',
-      'Diterima jelas oleh operator.',
-      '{singer} bernyanyi penuh ekspresi,',
-      'Nilai {score} tercatat di monitor!',
-    ],
-    commentaryTemplate:
-      'Monitor utama Diskomlekau menampilkan skor {score} untuk {singer} pada lagu "{song}". Kualitas vokal jernih bebas interferensi!',
-  },
-  {
-    id: 'med-10',
-    tier: 'medium',
-    badge: 'TAKE-OFF MULUS // NILAI 60 - 80',
-    pantunLines: [
-      'Lampu landasan menyala terang,',
-      'Memandu pilot di malam hari.',
-      '{singer} tampil hati pun senang,',
-      'Dapat skor {score} dari dewan juri!',
-    ],
-    commentaryTemplate:
-      'Take-off dan landing yang mulus dari {singer} di lagu "{song}" dengan nilai akhir {score}! Mari lanjutkan kemeriahan malam keakraban Diskomlekau!',
+      'Nilai {score} diraih {singer} pada lagu "{song}". Tetap semangat keluarga besar Diskomlekau!',
   },
 
   // ============================================================================
-  // KATEGORI 3: NILAI TINGGI (> 80) - SUPERSONIK, JENDERAL VOKAL, PENYANYI ASLI
+  // KATEGORI 3: NILAI TINGGI (> 80) - SUPER PENDEK, SUPERSONIK, JENDERAL VOKAL
   // ============================================================================
   {
     id: 'high-1',
     tier: 'high',
-    badge: 'JENDERAL VOKAL SUPERSONIK // NILAI > 80',
+    badge: 'SUPERSONIK // NILAI > 80',
     pantunLines: [
-      'Rudal jelajah melesat cepat,',
-      'Tepat mengenai jantung sasaran.',
-      'Suara {singer} sungguh memikat,',
-      'Skor {score} bikin juri kagum tak karuan!',
+      'Radar GCI sapu angkasa,',
+      'Deteksi dini musuh mendekat.',
+      '{singer} luar biasa,',
+      'Skor {score} bikin terpikat!',
     ],
     commentaryTemplate:
-      'LUAR BIASA! Daya ledak vokal setara rudal supersonik! {singer} membawakan "{song}" dan meraih nilai fantastis {score}! Jangan-jangan ini penyanyi aslinya yang sedang menyamar di Diskomlekau!',
+      'LUAR BIASA! {singer} membawakan "{song}" dan meraih nilai fantastis {score}!',
   },
   {
     id: 'high-2',
     tier: 'high',
-    badge: 'BINTANG EMAS DISKOMLEKAU // NILAI > 80',
+    badge: 'SUKHOI MACH 2 // NILAI > 80',
     pantunLines: [
-      'Garuda terbang tinggi di awan,',
-      'Swa Bhuwana Paksa semboyan kita.',
-      '{singer} bernyanyi bak bangsawan,',
-      'Nilai {score} mengguncang semesta!',
+      'Sukhoi terbang belah awan,',
+      'Manuver tajam penuh gaya.',
+      'Skor {score} sangat menawan,',
+      '{singer} penyanyi kelas dunia!',
     ],
     commentaryTemplate:
-      'Hormat komando untuk {singer}! Lagu "{song}" ditaklukkan dengan skor {score}! Akurasi nada seakurat radar pertahanan udara generasi terbaru!',
+      'Hormat komando untuk {singer}! Lagu "{song}" ditaklukkan dengan nilai tinggi {score}!',
   },
   {
     id: 'high-3',
     tier: 'high',
-    badge: 'KECEPATAN MACH 3 // NILAI > 80',
+    badge: 'BATERAI RUDAL // NILAI > 80',
     pantunLines: [
-      'Sinyal satelit pancarkan cahaya,',
-      'Jaringan kuat tanpa hambatan.',
-      'Vokal {singer} tiada duanya,',
-      'Skor {score} pecahkan rekor pangkalan!',
+      'Baterai rudal posisi siaga,',
+      'Komando tembak tunggu perintah.',
+      '{singer} tampil bangga,',
+      'Skor {score} bikin meriah!',
     ],
     commentaryTemplate:
-      'Rekor panggung terguncang! {singer} mencetak nilai rata-rata {score} pada lagu "{song}". Seluruh Dewan Juri Prajurit berdiri memberikan penghormatan tertinggi!',
+      'Rekor panggung terguncang! {singer} mencetak skor {score} di lagu "{song}"!',
   },
   {
     id: 'high-4',
     tier: 'high',
-    badge: 'KOMANDAN NADA TINGGI // NILAI > 80',
+    badge: 'SATELIT EMAS // NILAI > 80',
     pantunLines: [
-      'Langit biru cerah berseri,',
-      'Tempat berlatih para penerbang.',
-      '{singer} tampil memukau juri,',
-      'Lagu "{song}" meraih {score} gemilang!',
+      'Satelit komlek pancar data,',
+      'Jaringan kuat tembus samudra.',
+      '{singer} meraih skor {score},',
+      'Satu ruangan bersorak gembira!',
     ],
     commentaryTemplate:
-      'Sempurna tanpa celah! Skor {score} untuk {singer} lewat lagu "{song}". Kualitas frekuensi emas Korps Elektronika TNI Angkatan Udara!',
+      'Kejernihan vokal Ultra-HD dari {singer}! Skor {score} mutlak dari Dewan Juri Prajurit!',
   },
   {
     id: 'high-5',
     tier: 'high',
-    badge: 'RADAR EMAS TERKUNCI // NILAI > 80',
+    badge: 'RADAR GM-403 // NILAI > 80',
     pantunLines: [
-      'Pasang pemancar di puncak bukit,',
-      'Jangkauan luas sampai seberang.',
-      'Nada tinggi "{song}" yang sangat sulit,',
-      'Dilalap {singer} dengan skor {score} cemerlang!',
+      'Radar GM-403 kunci sasaran,',
+      'Deteksi jauh tanpa celah.',
+      '{singer} dapat {score} gemilang,',
+      'Bikin juri langsung menyerah!',
     ],
     commentaryTemplate:
-      'TV hampir retak saking dahsyatnya suara {singer}! Nilai {score} di lagu "{song}" membuktikan kelas vokal tingkat tinggi kebanggaan Diskomlekau!',
+      'Akurasi nada seakurat radar GM-403! Selamat untuk {singer} dengan nilai {score}!',
   },
   {
     id: 'high-6',
     tier: 'high',
-    badge: 'PENYANYI ASLI NYAMAR // NILAI > 80',
+    badge: 'MAESTRO DISKOMLEKAU // NILAI > 80',
     pantunLines: [
-      'Bintang kejora bersinar terang,',
-      'Menghias indah langit malam.',
-      'Suara emas {singer} selalu dikenang,',
-      'Skor {score} bikin suasana makin dalam!',
+      'Korps Elektronika penuh inovasi,',
+      'Teknologi canggih jadi andalan.',
+      '{singer} nilai {score} tinggi,',
+      'Panggung Diskomlekau jadi panutan!',
     ],
     commentaryTemplate:
-      'Fix, penyanyi asli nyamar jadi prajurit! {singer} mengguncang panggung lewat lagu "{song}" dengan skor spektakuler {score}!',
-  },
-  {
-    id: 'high-7',
-    tier: 'high',
-    badge: 'FREKUENSI ULTRA HD // NILAI > 80',
-    pantunLines: [
-      'Serat optik berkilau kaca,',
-      'Kirimkan data secepat kilat.',
-      'Penampilan {singer} luar biasa,',
-      'Skor {score} membuat semua terpikat!',
-    ],
-    commentaryTemplate:
-      'Kejernihan vokal Ultra-HD dari {singer}! Lagu "{song}" meraih skor {score} mutlak dari Dewan Juri Prajurit. Layak langsung rekaman album komando!',
-  },
-  {
-    id: 'high-8',
-    tier: 'high',
-    badge: 'SWA BHUWANA PAKSA // NILAI > 80',
-    pantunLines: [
-      'Sayap tanah air gagah perkasa,',
-      'Menjaga langit nusantara tercinta.',
-      '{singer} bernyanyi penuh wibawa,',
-      'Nilai {score} jadi bukti nyata!',
-    ],
-    commentaryTemplate:
-      'Penampilan berkelas bintang lima dari {singer} pada lagu "{song}"! Dengan skor {score}, panggung Vocal Simulation System Diskomlekau resmi membara!',
-  },
-  {
-    id: 'high-9',
-    tier: 'high',
-    badge: 'JUARA BERTAHAN PANGGUNG // NILAI > 80',
-    pantunLines: [
-      'Terbang malam memakai radar,',
-      'Cuaca cerah bintang bertabur.',
-      'Vokal {singer} benar-benar menggelegar,',
-      'Skor {score} bikin lawan langsung mundur!',
-    ],
-    commentaryTemplate:
-      'Standar tinggi baru telah ditetapkan! {singer} meraih nilai {score} di lagu "{song}". Siapa pun yang bernyanyi setelah ini wajib menyiapkan tenaga ekstra!',
-  },
-  {
-    id: 'high-10',
-    tier: 'high',
-    badge: 'MAESTRO KORPS ELEKTRO // NILAI > 80',
-    pantunLines: [
-      'Dari Sabang sampai Merauke,',
-      'Sinyal Diskomlek menyatu padu.',
-      'Kalau {singer} sudah mulai karaoke,',
-      'Skor {score} pasti langsung melaju!',
-    ],
-    commentaryTemplate:
-      'Maestro vokal Korps Elektronika! {singer} menutup lagu "{song}" dengan nilai {score}. Mari berikan tepuk tangan paling gemuruh!',
+      'Maestro vokal Korps Elektronika! {singer} menutup "{song}" dengan nilai {score}!',
   },
 
   // ============================================================================
-  // KATEGORI 4: PANTUN MANUAL / PENYEMANGAT PANGGUNG (TOMBOL "PANTUN MC")
+  // KATEGORI 4: PANTUN UTAMA SUPER PENDEK (AWAL LAGU & TOMBOL "PANTUN MC")
+  // 20 Pantun Basis Utama + 10 Tambahan Sukhoi/T-50/Thomson/GM-403/Hanud/Satelit
   // ============================================================================
   {
     id: 'man-1',
     tier: 'manual',
-    badge: 'SMART MC DISKOMLEKAU // PANTUN KOMANDO',
+    badge: 'RADAR HIJAU // SMART MC',
     pantunLines: [
-      'Burung elang terbang ke awan,',
-      'Menembus kabut di pagi hari.',
-      'Selamat datang para pahlawan,',
-      'Bersama {singer} mari bernyanyi!',
+      'Layar radar berkedip hijau,',
+      'Sinyal masuk dari angkasa.',
+      'Walau suara agak kacau,',
+      '{singer} tetap juara!',
     ],
     commentaryTemplate:
-      'Halo seluruh keluarga besar Diskomlekau! Saat ini panggung bersama {singer} di lagu "{song}". Ingat semboyan kita: Prajurit yang pantang mundur walau suara hancur!',
+      'Smart MC Diskomlekau memanggil {singer} di lagu "{song}". Tetap semangat juara!',
   },
   {
     id: 'man-2',
     tier: 'manual',
-    badge: 'FREKUENSI KEAKRABAN // SMART MC',
+    badge: 'PANTANG MUNDUR // SMART MC',
     pantunLines: [
-      'Antena tinggi menjulang megah,',
-      'Menangkap sinyal dari satelit.',
-      'Lagu "{song}" mengalun indah,',
-      'Semangat {singer} setinggi langit!',
+      'Rudal siap di peluncur,',
+      'Target terkunci tepat sasaran.',
+      'Pantang mundur walau hancur,',
+      'Nada meleset tetap bertahan!',
     ],
     commentaryTemplate:
-      'Sinyal keakraban Diskomlekau terkunci 100 persen! Mari seluruh prajurit dan dewan juri ramaikan panggung untuk {singer}!',
+      'Semboyan komando untuk {singer} di lagu "{song}": pantang mundur walau nada meleset!',
   },
   {
     id: 'man-3',
     tier: 'manual',
-    badge: 'KORPS ELEKTRONIKA // SMART MC',
+    badge: 'MENTAL PAHLAWAN // SMART MC',
     pantunLines: [
-      'Rakit pemancar di hari senin,',
-      'Uji gelombang di hari selasa.',
-      'Suara {singer} menyejukkan angin,',
-      'Keluarga Diskomlekau makin bahagia!',
+      'Pesawat tempur terbang rendah,',
+      'Manuver tajam membelah awan.',
+      'Suara fals bukan masalah,',
+      'Yang penting mental pahlawan!',
     ],
     commentaryTemplate:
-      'Dari meja kendali Smart MC Diskomlekau: Lagu "{song}" sedang mengudara bersama {singer}. Jangan lupa kirim sorak dan nilai terbaik dari HP masing-masing!',
+      'Ayo {singer}, hajar lagu "{song}" dengan mental pahlawan TNI Angkatan Udara!',
   },
   {
     id: 'man-4',
     tier: 'manual',
-    badge: 'SEMANGAT TEMPUR VOKAL // SMART MC',
+    badge: 'DRONE INTAI // SMART MC',
     pantunLines: [
-      'Pesawat tempur siap di landasan,',
-      'Mesin menderu siap mengudara.',
-      'Janganlah malu jangan sungkan,',
-      'Ayo {singer} goyang panggung kita!',
+      'Drone intai terbang tinggi,',
+      'Kirim data ke ruang kendali.',
+      'Mic digenggam sepenuh hati,',
+      'Lagu selesai tepuk tangan beri!',
     ],
     commentaryTemplate:
-      'Panggung Vocal Simulation System Diskomlekau semakin panas! Bersama {singer} yang sedang membawakan "{song}", mari kita bernyanyi bersama-sama!',
+      'Seluruh penonton siapkan tepuk tangan paling meriah untuk {singer} di lagu "{song}"!',
   },
   {
     id: 'man-5',
     tier: 'manual',
-    badge: 'JIWA KORSA TNI AU // SMART MC',
+    badge: 'ANTENA KOMLEK // SMART MC',
     pantunLines: [
-      'Bunga anggrek mekar di taman,',
-      'Dipetik satu oleh sang putri.',
-      'Hidup Korps Elektro penuh kebanggaan,',
-      'Siang bekerja malam bernyanyi!',
+      'Antena komlek berdiri tegak,',
+      'Frekuensi jernih tanpa gangguan.',
+      'Tarik napas jangan mendadak,',
+      'Nada tinggi jangan dipaksakan!',
     ],
     commentaryTemplate:
-      'Salam Swa Bhuwana Paksa! Smart MC mengapresiasi penampilan {singer} pada lagu "{song}". Siapkan mikrofon wireless HP Anda untuk duet seru!',
+      'Pesan hangat Smart MC untuk {singer}: santai saja menaklukkan nada tinggi "{song}"!',
   },
   {
     id: 'man-6',
     tier: 'manual',
-    badge: 'PANTANG MUNDUR // SMART MC',
+    badge: 'RADAR GCI // SMART MC',
     pantunLines: [
-      'Layar radar berwarna hijau,',
-      'Memantau langit sepanjang waktu.',
-      'Walau suara kadang agak kacau,',
-      'Semangat {singer} tetap nomor satu!',
+      'Radar GCI sapu angkasa,',
+      'Deteksi dini musuh mendekat.',
+      '{singer} luar biasa,',
+      'Suara berat bikin terpikat!',
     ],
     commentaryTemplate:
-      'Panggilan komando dari Smart MC Diskomlekau! Mari beri semangat penuh untuk {singer} di lagu "{song}". Komando!',
+      'Radar GCI mengunci penampilan memikat {singer} pada lagu "{song}"!',
+  },
+  {
+    id: 'man-7',
+    tier: 'manual',
+    badge: 'RUDAL KILAT // SMART MC',
+    pantunLines: [
+      'Rudal melesat secepat kilat,',
+      'Asap putih tinggalkan jejak.',
+      'Tempo lagu agak terlambat,',
+      'Tetap gaspol jangan menginjak!',
+    ],
+    commentaryTemplate:
+      'Gaspol terus {singer} kejar ketukan lagu "{song}"!',
+  },
+  {
+    id: 'man-8',
+    tier: 'manual',
+    badge: 'F-16 FIGHTING // SMART MC',
+    pantunLines: [
+      'F-16 lepas landas pagi,',
+      'Suara mesin menggelegar keras.',
+      'Kalah merdu tak usah rugi,',
+      'Yang penting gaya paling berkelas!',
+    ],
+    commentaryTemplate:
+      'Gaya panggung {singer} di lagu "{song}" resmi paling berkelas malam ini!',
+  },
+  {
+    id: 'man-9',
+    tier: 'manual',
+    badge: 'SATELIT ORBIT // SMART MC',
+    pantunLines: [
+      'Satelit orbit jaga jaringan,',
+      'Komando nyambung seluruh nusantara.',
+      'Pegang mic kayak pegang senapan,',
+      'Bidik nada jangan sampai cedera!',
+    ],
+    commentaryTemplate:
+      'Bidik setiap nada "{song}" dengan presisi tinggi, semangat {singer}!',
+  },
+  {
+    id: 'man-10',
+    tier: 'manual',
+    badge: 'DRONE QUADCOPTER // SMART MC',
+    pantunLines: [
+      'Drone quadcopter terbang melayang,',
+      'Kamera fokus pantau lapangan.',
+      '{singer} paling disayang,',
+      'Walau lirik sering ketinggalan!',
+    ],
+    commentaryTemplate:
+      'Kamera drone menyorot {singer}! Jangan berkedip baca lirik "{song}"!',
+  },
+  {
+    id: 'man-11',
+    tier: 'manual',
+    badge: 'TAMBAH LAGI // SMART MC',
+    pantunLines: [
+      'Sinyal radar bersih sekali,',
+      'Tak ada gangguan di monitor.',
+      'Nyanyi satu lagu kurang kali,',
+      'Tambah lagi biar makin gacor!',
+    ],
+    commentaryTemplate:
+      'Habis lagu "{song}", langsung masukkan lagu baru dari HP biar makin gacor!',
+  },
+  {
+    id: 'man-12',
+    tier: 'manual',
+    badge: 'RUDAL JARAK JAUH // SMART MC',
+    pantunLines: [
+      'Rudal jarak jauh siap siaga,',
+      'Menjaga langit ibu pertiwi.',
+      'Suara serak tetap terjaga,',
+      'Diskomlekau selalu di hati!',
+    ],
+    commentaryTemplate:
+      'Salam Swa Bhuwana Paksa! Bersama {singer} di lagu "{song}", Diskomlekau selalu di hati!',
+  },
+  {
+    id: 'man-13',
+    tier: 'manual',
+    badge: 'PESAWAT ANGKUT // SMART MC',
+    pantunLines: [
+      'Pesawat angkut mendarat mulus,',
+      'Bawa logistik tepat waktu.',
+      'Niat menghibur sudah tulus,',
+      'Fals dikit anggap lagu baru!',
+    ],
+    commentaryTemplate:
+      'Yang penting niat menghibur! Lanjutkan aksi {singer} di lagu "{song}"!',
+  },
+  {
+    id: 'man-14',
+    tier: 'manual',
+    badge: 'RADIO TAKTIS // SMART MC',
+    pantunLines: [
+      'Radio taktis ganti frekuensi,',
+      'Laporan masuk dari pos depan.',
+      '{singer} penuh aksi,',
+      'Suara emas standar komandan!',
+    ],
+    commentaryTemplate:
+      'Transmisi jernih dari {singer} membawakan "{song}" berstandar komandan!',
+  },
+  {
+    id: 'man-15',
+    tier: 'manual',
+    badge: 'GELOMBANG RADAR // SMART MC',
+    pantunLines: [
+      'Gelombang radar berputar cepat,',
+      'Memantau batas wilayah udara.',
+      'Jangan takut nada melompat,',
+      'Semua prajurit siap gembira!',
+    ],
+    commentaryTemplate:
+      'Mari bergembira bersama {singer} pada lagu "{song}"!',
+  },
+  {
+    id: 'man-16',
+    tier: 'manual',
+    badge: 'TEKNISI KOMLEK // SMART MC',
+    pantunLines: [
+      'Teknisi komlek cek kabel,',
+      'Semua sistem dalam kondisi siap.',
+      'Suara tinggi bikin sebel,',
+      'Turunin oktaf tetap mantap!',
+    ],
+    commentaryTemplate:
+      'Taktik jitu untuk {singer}: nada tinggi tinggal turunin satu oktaf di "{song}"!',
+  },
+  {
+    id: 'man-17',
+    tier: 'manual',
+    badge: 'SONIC BOOM // SMART MC',
+    pantunLines: [
+      'Tempuh udara kecepatan tinggi,',
+      'Sonic boom pecahkan sunyi.',
+      'Ayo prajurit jangan berhenti,',
+      'Goyang santai ikut bernyanyi!',
+    ],
+    commentaryTemplate:
+      'Semua prajurit ayo ikut goyang santai menemani {singer} di lagu "{song}"!',
+  },
+  {
+    id: 'man-18',
+    tier: 'manual',
+    badge: 'BATERAI RUDAL // SMART MC',
+    pantunLines: [
+      'Baterai rudal posisi siaga,',
+      'Komando tembak tunggu perintah.',
+      '{singer} tampil bangga,',
+      'Suara menggelegar bikin meriah!',
+    ],
+    commentaryTemplate:
+      'Suasana makin meriah bersama {singer} di lagu "{song}"!',
+  },
+  {
+    id: 'man-19',
+    tier: 'manual',
+    badge: 'DRONE MALAM // SMART MC',
+    pantunLines: [
+      'Drone malam nyalakan sensor,',
+      'Terbang senyap di atas awan.',
+      'Jangan ragu tarik suara,',
+      'Kaca aman takkan bergetar!',
+    ],
+    commentaryTemplate:
+      'Kaca ruangan aman terkendali! Tarik suara penuh {singer} di "{song}"!',
+  },
+  {
+    id: 'man-20',
+    tier: 'manual',
+    badge: 'KORPS ELEKTRONIKA // SMART MC',
+    pantunLines: [
+      'Korps Elektronika penuh inovasi,',
+      'Teknologi canggih jadi andalan.',
+      'Panggung karaoke siap beraksi,',
+      '{singer} jadi panutan!',
+    ],
+    commentaryTemplate:
+      'Panggung Diskomlekau siap beraksi! Beri semangat untuk panutan kita {singer}!',
+  },
+
+  // --- 10 Pantun Tambahan Super Pendek (Sukhoi, T-50, Thomson, GM-403, Hanud, Satelit) ---
+  {
+    id: 'man-21',
+    tier: 'manual',
+    badge: 'SUKHOI SU-30 // SMART MC',
+    pantunLines: [
+      'Sukhoi terbang belah awan,',
+      'Manuver tajam penuh gaya.',
+      '{singer} tampil bak pahlawan,',
+      'Fals dikit tetap percaya!',
+    ],
+    commentaryTemplate:
+      'Kecepatan Sukhoi mengawal {singer} menaklukkan lagu "{song}"!',
+  },
+  {
+    id: 'man-22',
+    tier: 'manual',
+    badge: 'JET T-50I // SMART MC',
+    pantunLines: [
+      'Jet T-50 melesat cepat,',
+      'Menari lincah di angkasa.',
+      '{singer} nyanyi penuh semangat,',
+      'Tetap menghibur semua pemirsa!',
+    ],
+    commentaryTemplate:
+      'Manuver lincah ala T-50i dari {singer} pada lagu "{song}"!',
+  },
+  {
+    id: 'man-23',
+    tier: 'manual',
+    badge: 'RADAR THOMSON // SMART MC',
+    pantunLines: [
+      'Radar Thomson berputar terang,',
+      'Pantau langit siang malam.',
+      'Suara {singer} makin lantang,',
+      'Semua hadirin ikut tentram!',
+    ],
+    commentaryTemplate:
+      'Radar Thomson menangkap gelombang merdu dari {singer} di lagu "{song}"!',
+  },
+  {
+    id: 'man-24',
+    tier: 'manual',
+    badge: 'RADAR GM-403 // SMART MC',
+    pantunLines: [
+      'Radar GM-403 kunci sasaran,',
+      'Deteksi jauh tanpa celah.',
+      'Mic dipegang penuh harapan,',
+      '{singer} nyanyi tak kenal lelah!',
+    ],
+    commentaryTemplate:
+      'Jangkauan vokal {singer} di "{song}" setara ketajaman radar GM-403!',
+  },
+  {
+    id: 'man-25',
+    tier: 'manual',
+    badge: 'RUDAL HANUD // SMART MC',
+    pantunLines: [
+      'Rudal hanud tegak siaga,',
+      'Jaga langit ibu pertiwi.',
+      'Suara {singer} bikin bangga,',
+      'Mari joget sampai pagi!',
+    ],
+    commentaryTemplate:
+      'Pertahanan udara solid, panggung pun heboh bersama {singer}!',
+  },
+  {
+    id: 'man-26',
+    tier: 'manual',
+    badge: 'KOMUNIKASI SATELIT // SMART MC',
+    pantunLines: [
+      'Satelit komlek pancar data,',
+      'Jaringan kuat tembus samudra.',
+      '{singer} nyanyi penuh cinta,',
+      'Bikin goyang satu tentara!',
+    ],
+    commentaryTemplate:
+      'Sinyal satelit Diskomlekau memancarkan lagu "{song}" bersama {singer}!',
+  },
+  {
+    id: 'man-27',
+    tier: 'manual',
+    badge: 'SUKHOI COBRA // SMART MC',
+    pantunLines: [
+      'Sukhoi manuver di atas awan,',
+      'Suara jet menggelegar keras.',
+      'Gaya {singer} paling menawan,',
+      'Nada tinggi sikat tuntas!',
+    ],
+    commentaryTemplate:
+      'Manuver Cobra vokal dari {singer} melibas nada tinggi "{song}"!',
+  },
+  {
+    id: 'man-28',
+    tier: 'manual',
+    badge: 'FORMASI T-50 // SMART MC',
+    pantunLines: [
+      'Jet T-50i siap mengudara,',
+      'Terbang formasi sangat rapi.',
+      'Jangan malu tarik suara,',
+      '{singer} pasti bikin happy!',
+    ],
+    commentaryTemplate:
+      'Formasi tempur vokal siap mengudara bersama {singer}!',
+  },
+  {
+    id: 'man-29',
+    tier: 'manual',
+    badge: 'SINYAL GM-403 // SMART MC',
+    pantunLines: [
+      'Radar GM-403 tangkap sinyal,',
+      'Monitor nyala sangat terang.',
+      'Suara {singer} tetap spesial,',
+      'Walau tempo kadang menghilang!',
+    ],
+    commentaryTemplate:
+      'Spesial tanpa batas untuk {singer} di tembang "{song}"!',
+  },
+  {
+    id: 'man-30',
+    tier: 'manual',
+    badge: 'SATELIT & HANUD // SMART MC',
+    pantunLines: [
+      'Sinyal satelit tembus angkasa,',
+      'Rudal hanud siap menjaga.',
+      '{singer} tampil luar biasa,',
+      'Satu panggung ikut bangga!',
+    ],
+    commentaryTemplate:
+      'Seluruh keluarga besar Diskomlekau bangga menyaksikan aksi {singer}!',
   },
 ];
 
 // Riwayat ID pantun terakhir agar tidak mengulang pantun yang sama berturut-turut
 const recentTemplateIds: string[] = [];
+
+// Pelacak seragam MC bergantian (biru langit <-> loreng) agar tampilan selalu bervariasi
+let lastGeneratedMcUniform: McUniformType = 'loreng';
+
+export function getNextMcUniform(): McUniformType {
+  lastGeneratedMcUniform = lastGeneratedMcUniform === 'biru' ? 'loreng' : 'biru';
+  return lastGeneratedMcUniform;
+}
 
 export function getTierFromScore(score?: number | null): SmartMcTier {
   if (typeof score !== 'number' || isNaN(score)) return 'manual';
@@ -516,6 +683,7 @@ export interface GenerateSmartMcOptions {
   songTitle?: string;
   score?: number | null;
   forceTier?: SmartMcTier;
+  mcUniform?: McUniformType;
   triggeredBy?: string;
   isManual?: boolean;
   nextSongTitle?: string;
@@ -540,12 +708,16 @@ export function generateSmartMcAnnouncement(options: GenerateSmartMcOptions = {}
 
   const pool = SMART_MC_TEMPLATES.filter((t) => t.tier === tier);
   const available = pool.filter((t) => !recentTemplateIds.includes(t.id));
-  const candidates = available.length > 0 ? available : pool;
+  const lastId = recentTemplateIds[recentTemplateIds.length - 1];
+  const nonImmediateRepeat = pool.filter((t) => t.id !== lastId);
+  const candidates =
+    available.length > 0 ? available : nonImmediateRepeat.length > 0 ? nonImmediateRepeat : pool;
 
   const chosen = candidates[Math.floor(Math.random() * candidates.length)] || SMART_MC_TEMPLATES[0];
 
   recentTemplateIds.push(chosen.id);
-  if (recentTemplateIds.length > 6) {
+  const maxHistory = Math.max(8, Math.min(29, pool.length - 1));
+  while (recentTemplateIds.length > maxHistory) {
     recentTemplateIds.shift();
   }
 
@@ -562,11 +734,13 @@ export function generateSmartMcAnnouncement(options: GenerateSmartMcOptions = {}
 
   // Narasi audio MC ringkas: HANYA vokalis yang memilih lagu, judul lagu, dan pantun
   const fullSpeechText = `Vokalis ${cleanSinger}, lagu ${cleanSong}. ${pantunLines.join(', ')}.`;
+  const resolvedUniform: McUniformType = options.mcUniform || getNextMcUniform();
 
   return {
     id: `mc-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
     tier,
     badge: chosen.badge,
+    mcUniform: resolvedUniform,
     pantunLines,
     sampiran,
     isi,
@@ -632,18 +806,18 @@ export function calculateSmartMcDisplayDurationMs(
   if (typeof announcement === 'string') {
     fullReadableText = announcement;
   } else if (announcement) {
-    const parts = [
-      announcement.namaVokalis || announcement.singerName || '',
-      announcement.judulLagu || announcement.songTitle || '',
-      ...(announcement.sampiran || []),
-      ...(announcement.isi || []),
-      ...(announcement.pantunLines || []),
-      announcement.komentar || announcement.commentary || '',
-      announcement.fullSpeechText || '',
-    ]
-      .map((s) => (s || '').trim())
-      .filter(Boolean);
-    fullReadableText = parts.join(' ');
+    if (announcement.fullSpeechText && announcement.fullSpeechText.trim()) {
+      fullReadableText = announcement.fullSpeechText.trim();
+    } else {
+      const parts = [
+        announcement.namaVokalis || announcement.singerName || '',
+        announcement.judulLagu || announcement.songTitle || '',
+        ...(announcement.pantunLines || [...(announcement.sampiran || []), ...(announcement.isi || [])]),
+      ]
+        .map((s) => (s || '').trim())
+        .filter(Boolean);
+      fullReadableText = parts.join(' ');
+    }
   }
 
   const charCount = fullReadableText.replace(/\s+/g, ' ').trim().length;
@@ -652,13 +826,13 @@ export function calculateSmartMcDisplayDurationMs(
     .split(/\s+/)
     .filter(Boolean).length;
 
-  // Hitung estimasi waktu baca wajar pada kecepatan 1.28x (sekitar 45ms/karakter atau 360ms/kata + jeda visual HUD)
-  const charBasedMs = 6000 + charCount * 45;
-  const wordBasedMs = 5500 + wordCount * 360;
+  // Hitung estimasi waktu baca wajar pada kecepatan 1.28x (sekitar 55ms/karakter atau 400ms/kata + jeda visual HUD)
+  const charBasedMs = 5000 + charCount * 55;
+  const wordBasedMs = 5000 + wordCount * 400;
   const computedMs = Math.max(charBasedMs, wordBasedMs);
 
-  // Minimum 14.5 detik agar terbaca utuh tanpa terlalu lama; batas atas aman 34 detik
-  return Math.max(14500, Math.min(34000, Math.round(computedMs)));
+  // Minimum 11 detik agar pantun pendek terbaca nyaman, maksimum aman 28 detik
+  return Math.max(11000, Math.min(28000, Math.round(computedMs)));
 }
 
 /**

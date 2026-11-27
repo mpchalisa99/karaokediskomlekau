@@ -169,10 +169,13 @@ export function getScoreQuote(score: number, seed?: string | number): string {
 
 export type SmartMcTier = 'low' | 'medium' | 'high' | 'manual';
 
+export type McUniformType = 'biru' | 'loreng';
+
 export interface SmartMcAnnouncement {
   id: string;
   tier: SmartMcTier;
   badge: string;
+  mcUniform?: McUniformType;
   pantunLines: [string, string, string, string];
   sampiran?: [string, string] | string[];
   isi?: [string, string] | string[];
